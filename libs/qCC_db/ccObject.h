@@ -22,9 +22,8 @@
 #include "ccSerializableObject.h"
 
 //Qt
-#include <qglobal.h>
-#include <QVariant>
 #include <QSharedPointer>
+#include <QVariant>
 
 
 //! Object state flag
@@ -114,7 +113,7 @@ public:
 	static const CC_CLASS_ENUM EXTRU				=	PRIMITIVE			| CC_EXTRU_BIT;
 	static const CC_CLASS_ENUM QUADRIC				=	PRIMITIVE			| CC_QUADRIC_BIT;
 	static const CC_CLASS_ENUM MATERIAL_SET			=	CC_MATERIAL_BIT		| CC_GROUP_BIT				| CC_LEAF_BIT;
-	static const CC_CLASS_ENUM CHUNKED_ARRAY		=	CC_ARRAY_BIT;
+	static const CC_CLASS_ENUM ARRAY				=	CC_ARRAY_BIT;
 	static const CC_CLASS_ENUM NORMALS_ARRAY		=	CC_ARRAY_BIT		| CC_NORMAL_BIT				| CC_LEAF_BIT;
 	static const CC_CLASS_ENUM NORMAL_INDEXES_ARRAY	=	CC_ARRAY_BIT		| CC_COMPRESSED_NORMAL_BIT	| CC_LEAF_BIT;
 	static const CC_CLASS_ENUM RGB_COLOR_ARRAY		=	CC_ARRAY_BIT		| CC_RGB_COLOR_BIT			| CC_LEAF_BIT;
@@ -128,8 +127,8 @@ public:
 	//  Custom types
 	/** Custom objects are typically defined by plugins. They can be inserted in an object
 		hierarchy or displayed in an OpenGL context like any other ccHObject.
-		To differentiate custom objects, use the meta-data mechanism (see ccOBject::getMetaData
-		and ccOBject::setMetaData). You can also define a custom icon (see ccHObject::getIcon).
+		To differentiate custom objects, use the meta-data mechanism (see ccObject::getMetaData
+		and ccObject::setMetaData). You can also define a custom icon (see ccHObject::getIcon).
 
 		It is highly advised to use the ccCustomHObject and ccCustomLeafObject interfaces to
 		define a custom types. Carefully read the ccCustomHObject::isDeserialized method's

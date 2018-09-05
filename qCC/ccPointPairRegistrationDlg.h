@@ -19,7 +19,12 @@
 #define POINT_PAIR_REGISTRATION_DIALOG_HEADER
 
 //Local
-#include <ccOverlayDialog.h>
+#include "ccOverlayDialog.h"
+#include "ccPickingListener.h"
+#include "ccMainAppInterface.h"
+
+//CCLib
+#include <PointProjectionTools.h>
 
 //qCC_db
 #include <ccPointCloud.h>
@@ -32,16 +37,17 @@ class ccGenericPointCloud;
 class ccGenericGLDisplay;
 class ccGLWindow;
 class cc2DLabel;
+class ccPickingHub;
 
 //Dialog for the point-pair registration algorithm (Horn)
-class ccPointPairRegistrationDlg : public ccOverlayDialog, Ui::pointPairRegistrationDlg
+class ccPointPairRegistrationDlg : public ccOverlayDialog, public ccPickingListener, Ui::pointPairRegistrationDlg
 {
 	Q_OBJECT
 
 public:
 
 	//! Default constructor
-	explicit ccPointPairRegistrationDlg(QWidget* parent = 0);
+	explicit ccPointPairRegistrationDlg(ccPickingHub* pickingHub, ccMainAppInterface* app, QWidget* parent = 0);
 
 	//inherited from ccOverlayDialog
 	virtual bool linkWith(ccGLWindow* win);
@@ -69,6 +75,9 @@ public:
 	//! Removes a point from the 'reference' set
 	void removeRefPoint(int index, bool autoRemoveDualPoint = true);
 
+	//! Inherited from ccPickingListener
+	virtual void onItemPicked(const PickedItem& pi);
+
 protected slots:
 
 	//! Slot called to change aligned cloud visibility
@@ -88,8 +97,6 @@ protected slots:
 
 	//! Slot called when a "delete" button is pushed
 	void onDelButtonPushed();
-
-	void processPickedItem(ccHObject*, unsigned, int, int, const CCVector3&);
 
 	//! Updates the registration info and buttons states
 	void updateAlignInfo();
@@ -158,6 +165,11 @@ protected:
 	//! Whether the dialog is paused or not
 	bool m_paused;
 
+	//! Picking hub
+	ccPickingHub* m_pickingHub;
+
+	//! Main application interface
+	ccMainAppInterface* m_app;
 };
 
 #endif //POINT_PAIR_REGISTRATION_DIALOG_HEADER

@@ -44,6 +44,7 @@ struct dbTreeSelectionInfo
 	size_t normalsCount;
 	size_t octreeCount;
 	size_t cloudCount;
+	size_t gridCound;
 	size_t groupCount;
 	size_t polylineCount;
 	size_t planeCount;
@@ -63,6 +64,8 @@ struct dbTreeSelectionInfo
 //! Custom QTreeView widget (for advanced selection behavior)
 class ccCustomQTreeView : public QTreeView
 {
+	Q_OBJECT
+	
 public:
 
 	//! Default constructor
@@ -123,7 +126,7 @@ public:
 	//! Returns selected entities in DB tree (optionally with a given type and additional information)
 	size_t getSelectedEntities(	ccHObject::Container& selectedEntities,
 								CC_CLASS_ENUM filter = CC_TYPES::OBJECT,
-								dbTreeSelectionInfo* info = NULL);
+								dbTreeSelectionInfo* info = nullptr);
 
 	//! Expands tree at a given node
 	void expandElement(ccHObject* object, bool state);
@@ -215,9 +218,12 @@ protected slots:
 	void alignCameraWithEntityDirect() { alignCameraWithEntity(false); }
 	void alignCameraWithEntityIndirect() { alignCameraWithEntity(true); }
 	void enableBubbleViewMode();
+	void editLabelScalarValue();
 
 signals:
 	void selectionChanged();
+	void dbIsEmpty();
+	void dbIsNotEmptyAnymore();
 
 protected:
 
@@ -296,6 +302,8 @@ protected:
 	QAction* m_alignCameraWithEntityReverse;
 	//! Context menu action: enable bubble-view (on a sensor)
 	QAction* m_enableBubbleViewMode;
+	//! Context menu action: change current scalar value (via a 2D label)
+	QAction* m_editLabelScalarValue;
 
 	//! Last context menu pos
 	QPoint m_contextMenuPos;

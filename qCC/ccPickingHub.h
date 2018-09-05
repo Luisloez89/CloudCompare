@@ -36,7 +36,7 @@
 class QMdiSubWindow;
 class ccHObject;
 
-//! Point /triangle picking hub
+//! Point/triangle picking hub
 class ccPickingHub : public QObject
 {
 	Q_OBJECT
@@ -44,7 +44,8 @@ class ccPickingHub : public QObject
 public:
 	
 	//! Default constructor
-	ccPickingHub(ccMainAppInterface* app, QObject* parent = 0);
+	ccPickingHub(ccMainAppInterface* app, QObject* parent = nullptr);
+	virtual ~ccPickingHub() = default;
 
 	//! Returns the number of currently registered listeners
 	inline size_t listenerCount() const { return m_listeners.size(); }
@@ -53,9 +54,13 @@ public:
 	/** \param listener listener to be registered
 		\param exclusive prevents new listeners from registering
 		\param autoStartPicking automatically enables the picking mode on the active window (if any)
+		\param mode sets the picking mode (warning: may be rejected if another listener is currently registered with another mode)
 		\return success
 	***/
-	bool addListener(ccPickingListener* listener, bool exclusive = false, bool autoStartPicking = true);
+	bool addListener(	ccPickingListener* listener,
+						bool exclusive = false,
+						bool autoStartPicking = true,
+						ccGLWindow::PICKING_MODE mode = ccGLWindow::POINT_OR_TRIANGLE_PICKING);
 
 	//! Removes a listener
 	/** \param listener listener to be removed
@@ -63,15 +68,21 @@ public:
 	***/
 	void removeListener(ccPickingListener* listener, bool autoStopPickingIfLast = true);
 
-	//! Sets the default picking mode
-	/** \param mode picking mode
-		\param autoEnableOnActivatedWindow whether picking mode should be enabled automatically on newly activated windows (if listeners are present only)
-	**/
+	//	//! Sets the default picking mode
+	//	/** \param mode picking mode
+	//		\param autoEnableOnActivatedWindow whether picking mode should be enabled automatically on newly activated windows (if listeners are present only)
+	//	**/
 	//DGM: too dangerous, we can't change this behavior on the fly
 	//void setPickingMode(ccGLWindow::PICKING_MODE mode, bool autoEnableOnActivatedWindow = true);
 	
 	//! Manual start / stop of the picking mode on the active window
 	void togglePickingMode(bool state);
+
+	//! Returns the currently active window
+	ccGLWindow* activeWindow() const { return m_activeGLWindow; }
+
+	//! Returns whether the picking mechanism is currently locked (i.e. an exclusive listener is registered)
+	bool isLocked() const { return m_exclusive && !m_listeners.empty(); }
 
 public slots:
 

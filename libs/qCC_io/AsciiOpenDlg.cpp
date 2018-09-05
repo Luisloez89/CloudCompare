@@ -44,7 +44,10 @@
 #include <assert.h>
 
 //Semi-persistent value for max. cloud size
-static double s_maxCloudSizeDoubleSpinBoxValue = (double)CC_MAX_NUMBER_OF_POINTS_PER_CLOUD/1.0e6;
+static double s_maxCloudSizeDoubleSpinBoxValue = (CC_MAX_NUMBER_OF_POINTS_PER_CLOUD / 1.0e6);
+
+//Max number of points/lines to detect a column as 'labels'
+static unsigned s_maxLabelCount = 256;
 
 //! Dialog 'context'
 struct AsciiOpenContext
@@ -63,7 +66,7 @@ struct AsciiOpenContext
 	{
 		extractSFNameFrom1stLine = ui->extractSFNamesFrom1stLineCheckBox->isChecked();
 		maxPointCountPerCloud = ui->maxCloudSizeDoubleSpinBox->value();
-		separator = ui->lineEditSeparator->text()[0];
+		separator = ui->lineEditSeparator->text().at( 0 );
 		skipLines = ui->spinBoxSkipLines->value();
 	}
 
@@ -137,11 +140,11 @@ void AsciiOpenDlg::setFilename(QString filename)
 
 void AsciiOpenDlg::autoFindBestSeparator()
 {
-	QList<QChar> separators;
-	separators << QChar(' ');
-	separators << QChar('\t');
-	separators << QChar(',');
-	separators << QChar(';');
+	const QList<QChar> separators{ QChar(' '),
+									QChar('\t'),
+									QChar(','),
+									QChar(';'),
+								 };
 
 	//We try all default separators...
 	size_t maxValidColumnCount = 0;
@@ -199,6 +202,7 @@ static bool CouldBeGrey(const QString& colHeader) { return colHeader == AsciiHea
 static bool CouldBeRGBi(const QString& colHeader) { return colHeader == AsciiHeaderColumns::RGB32i().toUpper(); }
 static bool CouldBeRGBf(const QString& colHeader) { return colHeader == AsciiHeaderColumns::RGB32f().toUpper(); }
 static bool CouldBeScal(const QString& colHeader) { return colHeader.contains("SCALAR"); }
+static bool CouldBeLabel(const QString& colHeader) { return colHeader.contains("LABEL") || colHeader.contains("NAME"); }
 
 static const unsigned MAX_COLUMNS = 256;				//maximum number of columns that can be handled
 static const unsigned LINES_READ_FOR_STATS = 200;		//number of lines read for stats
@@ -247,7 +251,7 @@ void AsciiOpenDlg::onSeparatorChange(const QString& separator)
 void AsciiOpenDlg::updateTable()
 {
 	m_ui->tableWidget->setEnabled(false);
-	m_ui->extractSFNamesFrom1stLineCheckBox->setEnabled(false);
+	//m_ui->extractSFNamesFrom1stLineCheckBox->setEnabled(false); //we can't do that here (as we may have restored the state of this checkbox before calling updateTable)
 
 	bool hadValidHeader = !m_headerLine.isEmpty();
 	m_headerLine.clear();
@@ -255,6 +259,7 @@ void AsciiOpenDlg::updateTable()
 	if (m_filename.isEmpty())
 	{
 		m_ui->tableWidget->clear();
+		m_ui->extractSFNamesFrom1stLineCheckBox->setEnabled(false);
 		return;
 	}
 	//we open the file in ASCII mode
@@ -263,18 +268,27 @@ void AsciiOpenDlg::updateTable()
 	{
 		m_ui->tableWidget->clear();
 		m_columnType.clear();
+		m_ui->extractSFNamesFrom1stLineCheckBox->setEnabled(false);
 		return;
 	}
 	QTextStream stream(&file);
 
 	//we skip first lines (if needed)
 	{
-		for (unsigned i = 0; i < m_skippedLines; ++i)
+		for (unsigned i = 0; i < m_skippedLines;)
 		{
 			QString currentLine = stream.readLine();
+			if (currentLine.isEmpty())
+			{
+				//empty lines are ignored
+				continue;
+			}
 			//we keep track of the first line
 			if (i == 0)
+			{
 				m_headerLine = currentLine;
+			}
+			++i;
 		}
 	}
 
@@ -298,9 +312,20 @@ void AsciiOpenDlg::updateTable()
 	std::vector<bool> valueIsBelow255;	//identifies columns with integer values between 0 and 255 only
 
 	QChar decimalPoint = QLocale().decimalPoint();
-	QString currentLine = stream.readLine();
-	while (lineCount < LINES_READ_FOR_STATS && !currentLine.isNull())
+	while (lineCount < LINES_READ_FOR_STATS)
 	{
+		QString currentLine = stream.readLine();
+		if (currentLine.isNull())
+		{
+			//end of file reached
+			break;
+		}
+		if (currentLine.isEmpty())
+		{
+			//empty lines are ignored
+			continue;
+		}
+
 		//we recognize "//" as the beginning of a comment
 		if (!currentLine.startsWith("//")/* || !currentLine.startsWith("#")*/)
 		{
@@ -387,13 +412,11 @@ void AsciiOpenDlg::updateTable()
 				//if the very first line is a comment, then we force the user to skip it!
 				//this way it will be considered as a header
 				m_ui->spinBoxSkipLines->setMinimum(1);
+				m_ui->extractSFNamesFrom1stLineCheckBox->setEnabled(false);
 				return;
 			}
 			++commentLines;
 		}
-
-		//read next line
-		currentLine = stream.readLine();
 	}
 
 	file.close();
@@ -441,11 +464,13 @@ void AsciiOpenDlg::updateTable()
 
 	//average line size
 	m_averageLineSize = static_cast<double>(totalChars) / lineCount;
+	unsigned approximateTotalLineCount = static_cast<unsigned>(file.size() / m_averageLineSize);
 
 	//we add a type selector for each column
 	QStringList propsText;
 	{
-		for (unsigned i = 0; i < ASCII_OPEN_DLG_TYPES_NUMBER; i++)
+		propsText.reserve(ASCII_OPEN_DLG_TYPES_COUNT);
+		for (unsigned i = 0; i < ASCII_OPEN_DLG_TYPES_COUNT; i++)
 		{
 			propsText << QString(ASCII_OPEN_DLG_TYPES_NAMES[i]);
 		}
@@ -471,6 +496,7 @@ void AsciiOpenDlg::updateTable()
 		static const QIcon RGBIcon		(QString::fromUtf8(":/CC/images/typeRgbCcolor.png"));
 		static const QIcon GreyIcon		(QString::fromUtf8(":/CC/images/typeGrayColor.png"));
 		static const QIcon ScalarIcon	(QString::fromUtf8(":/CC/images/typeSF.png"));
+		static const QIcon LabelIcon	(QString::fromUtf8(":/CC/images/dbLabelSymbol.png"));
 
 		int columnWidth = (m_ui->tableWidget->width() * 9) / (columnsCount * 10);
 		columnWidth = std::max(columnWidth, 80);
@@ -483,7 +509,7 @@ void AsciiOpenDlg::updateTable()
 			{
 				columnHeaderWidget = new QComboBox();
 				columnHeaderWidget->addItems(propsText);
-				columnHeaderWidget->setMaxVisibleItems(ASCII_OPEN_DLG_TYPES_NUMBER);
+				columnHeaderWidget->setMaxVisibleItems(ASCII_OPEN_DLG_TYPES_COUNT);
 				columnHeaderWidget->setCurrentIndex(0);
 				columnHeaderWidget->setItemIcon(ASCII_OPEN_DLG_X, xIcon);
 				columnHeaderWidget->setItemIcon(ASCII_OPEN_DLG_Y, yIcon);
@@ -498,9 +524,10 @@ void AsciiOpenDlg::updateTable()
 				columnHeaderWidget->setItemIcon(ASCII_OPEN_DLG_Gf, RGBIcon);
 				columnHeaderWidget->setItemIcon(ASCII_OPEN_DLG_Bf, RGBIcon);
 				columnHeaderWidget->setItemIcon(ASCII_OPEN_DLG_Grey, GreyIcon);
-				columnHeaderWidget->setItemIcon(ASCII_OPEN_DLG_Scalar, ScalarIcon);
 				columnHeaderWidget->setItemIcon(ASCII_OPEN_DLG_RGB32i, RGBIcon);
 				columnHeaderWidget->setItemIcon(ASCII_OPEN_DLG_RGB32f, RGBIcon);
+				columnHeaderWidget->setItemIcon(ASCII_OPEN_DLG_Label, LabelIcon);
+				columnHeaderWidget->setItemIcon(ASCII_OPEN_DLG_Scalar, ScalarIcon);
 
 				connect(columnHeaderWidget, SIGNAL(currentIndexChanged(int)), this, SLOT(columnsTypeHasChanged(int)));
 			}
@@ -515,7 +542,28 @@ void AsciiOpenDlg::updateTable()
 
 			//a non-numerical column can't be valid
 			if (!valueIsNumber[i])
+			{
 				m_columnType[i] = TEXT;
+			}
+			else
+			{
+				// we must do this to ensure we can get a correct result.
+				// Otherwise, we may fail in such situations:
+				//
+				// FILE:
+				// Line1   : $ gps file
+				// Line2   : $ id name x y z
+				// Line3   : 500
+				// Line4   : 0    0001.JPG  753811.417453   4307200.381522      1957.803955
+				// Linex   : ......
+				// Line503 : 499  0500.JPG  753630.672714   4307195.433217      1957.803955
+				// 
+				// Description:
+				// once we open the file, we will get a %m_columnType with 5 values of "TEXT"
+				// then if we choose to skip the 3 first lines, we get a %valueIsNumber with 5 "true"
+				// but the %m_columnType is still with 5 values of "TEXT" which leads to the failure!
+				m_columnType[i] = UNKNOWN;
+			}
 		}
 	}
 
@@ -547,6 +595,7 @@ void AsciiOpenDlg::updateTable()
 		}
 
 		//first with the help of the header (if any)
+		bool labelColumnAssigned = false;
 		if (validHeader)
 		{
 			for (unsigned i = 0; i < columnsCount; i++)
@@ -669,6 +718,15 @@ void AsciiOpenDlg::updateTable()
 						columnHeaderWidget->setCurrentIndex(ASCII_OPEN_DLG_Scalar);
 						m_columnType[i] = VALID;
 					}
+					else if (!labelColumnAssigned && approximateTotalLineCount < s_maxLabelCount && CouldBeLabel(colHeader)) //no need to promote labels if there are too many of them ;)
+					{
+						//label
+						columnHeaderWidget->setCurrentIndex(ASCII_OPEN_DLG_Label);
+						m_columnType[i] = VALID;
+						labelColumnAssigned = true;
+					}
+
+					columnHeaderWidget->blockSignals(false);
 				}
 			}
 		} //if (validHeader)
@@ -679,8 +737,20 @@ void AsciiOpenDlg::updateTable()
 			{
 				if (m_columnType[i] == TEXT)
 				{
+					if (!labelColumnAssigned && columnsCount > 1 && approximateTotalLineCount < s_maxLabelCount)
+					{
+						QComboBox* columnHeaderWidget = static_cast<QComboBox*>(m_ui->tableWidget->cellWidget(0, i));
+						assert(columnHeaderWidget);
+						columnHeaderWidget->blockSignals(true);
+						columnHeaderWidget->setCurrentIndex(ASCII_OPEN_DLG_Label);
+						columnHeaderWidget->blockSignals(false);
+
+						labelColumnAssigned = true; //There Can Be Only One!
+					}
 					continue;
 				}
+
+				//now we deal with numerical values only
 				assert(valueIsNumber[i]);
 
 				//first time? let's try to assign each column a type
@@ -818,10 +888,20 @@ void AsciiOpenDlg::checkSelectedColumnsValidity()
 	{
 		assert(m_columnType.size() == static_cast<size_t>(m_columnsCount));
 		assert(m_ui->tableWidget->columnCount() >= static_cast<int>(m_columnsCount));
+		m_ui->show2DLabelsCheckBox->setEnabled(false);
 		for (unsigned i = 0; i < m_columnsCount; i++)
 		{
 			QComboBox* columnHeaderWidget = static_cast<QComboBox*>(m_ui->tableWidget->cellWidget(0, i));
-			m_selectedInvalidColumns |= (m_columnType[i] == TEXT && columnHeaderWidget->currentIndex() != 0);
+
+			if (columnHeaderWidget->currentIndex() == ASCII_OPEN_DLG_Label)
+			{
+				m_ui->show2DLabelsCheckBox->setEnabled(true);
+			}
+			else if (m_columnType[i] == TEXT && columnHeaderWidget->currentIndex() != 0)
+			{
+				//text columns shouldn't be selected (other than for Labels)
+				m_selectedInvalidColumns |= true;
+			}
 		}
 	}
 
@@ -834,15 +914,15 @@ bool AsciiOpenDlg::CheckOpenSequence(const AsciiOpenDlg::Sequence& sequence, QSt
 	//two requirements:
 	//- at least 2 coordinates must be defined
 	//- apart from SFs, only one column assignment per property
-	std::vector<unsigned> counters(ASCII_OPEN_DLG_TYPES_NUMBER,0);
+	std::vector<unsigned> counters(ASCII_OPEN_DLG_TYPES_COUNT, 0);
 	{
-		for (size_t i=0; i<sequence.size(); i++)
+		for (size_t i = 0; i < sequence.size(); i++)
 			++counters[sequence[i].type];
 	}
 
 	//check for doublons
 	{
-		for (size_t i=1; i<ASCII_OPEN_DLG_Scalar; i++)
+		for (size_t i = 1; i < ASCII_OPEN_DLG_Scalar; i++)
 		{
 			if (counters[i] > 1)
 			{
@@ -892,6 +972,11 @@ void AsciiOpenDlg::applyAll()
 	s_asciiOpenContext.applyAll = true;
 }
 
+void AsciiOpenDlg::ResetApplyAll()
+{
+	s_asciiOpenContext.applyAll = false;
+}
+
 bool AsciiOpenDlg::restorePreviousContext()
 {
 	if (!s_asciiOpenContext.applyAll)
@@ -899,6 +984,7 @@ bool AsciiOpenDlg::restorePreviousContext()
 
 	//restore previous dialog state
 	s_asciiOpenContext.load(m_ui);
+	m_skippedLines = static_cast<unsigned>(std::max(0, s_asciiOpenContext.skipLines));
 	updateTable();
 
 	//saved sequence and cloud content don't match!!!
@@ -950,7 +1036,7 @@ AsciiOpenDlg::Sequence AsciiOpenDlg::getOpenSequence() const
 			const QComboBox* combo = static_cast<QComboBox*>(m_ui->tableWidget->cellWidget(0, i));
 			if (!combo) //yes, it happens if all lines are skipped!
 				break;
-			seq.push_back(SequenceItem(static_cast<CC_ASCII_OPEN_DLG_TYPES>(combo->currentIndex()), headerParts.size() > static_cast<int>(i) ? headerParts[i] : QString()));
+			seq.emplace_back(static_cast<CC_ASCII_OPEN_DLG_TYPES>(combo->currentIndex()), headerParts.size() > static_cast<int>(i) ? headerParts[i] : QString());
 		}
 	}
 
@@ -969,13 +1055,13 @@ bool AsciiOpenDlg::safeSequence() const
 		return false;
 
 	AsciiOpenDlg::Sequence seq = getOpenSequence();
-	QStringList headerParts = m_headerLine.split(m_separator,QString::SkipEmptyParts);
+	QStringList headerParts = m_headerLine.split(m_separator, QString::SkipEmptyParts);
 
 	//not enough column headers?
 	if (headerParts.size() < static_cast<int>(seq.size()))
 		return false;
 
-	for (int i=0; i<headerParts.size(); ++i)
+	for (int i = 0; i < headerParts.size(); ++i)
 	{
 		//column header
 		QString colHeader = headerParts[i].toUpper();
@@ -1041,6 +1127,10 @@ bool AsciiOpenDlg::safeSequence() const
 				&&	!colHeader.contains("RGB"))
 				return false;
 			break;
+		case ASCII_OPEN_DLG_Label:
+			if (!CouldBeLabel(colHeader))
+				return false;
+			break;
 		default:
 			//unhandled case?!
 			assert(false);
@@ -1077,7 +1167,7 @@ void AsciiOpenDlg::columnsTypeHasChanged(int index)
 	//now we look which column's combobox it is
 	for (unsigned i = 0; i < m_columnsCount; i++)
 	{
-		QComboBox* combo = static_cast<QComboBox*>(m_ui->tableWidget->cellWidget(0,i));
+		QComboBox* combo = static_cast<QComboBox*>(m_ui->tableWidget->cellWidget(0, i));
 		//we found the right element
 		if (changedCombo == combo)
 		{
@@ -1170,6 +1260,11 @@ void AsciiOpenDlg::shortcutButtonPressed()
 unsigned AsciiOpenDlg::getMaxCloudSize() const
 {
 	return static_cast<unsigned>(floor(m_ui->maxCloudSizeDoubleSpinBox->value() * 1.0e6));
+}
+
+bool AsciiOpenDlg::showLabelsIn2D() const
+{
+	return m_ui->show2DLabelsCheckBox->isEnabled() && m_ui->show2DLabelsCheckBox->isChecked();
 }
 
 void AsciiOpenDlg::resizeWidthToFitTableColumns()

@@ -62,10 +62,8 @@ ccRegistrationDlg::ccRegistrationDlg(ccHObject *data, ccHObject *model, QWidget*
 
 	setColorsAndLabels();
 
-	QColor qRed(255,0,0);
-	QColor qYellow(255,255,0);
-	ccQtHelpers::SetButtonColor(dataColorButton,qRed);
-	ccQtHelpers::SetButtonColor(modelColorButton,qYellow);
+	ccQtHelpers::SetButtonColor(dataColorButton, Qt::red);
+	ccQtHelpers::SetButtonColor(modelColorButton, Qt::yellow);
 
 	int idealThreadCount = QThread::idealThreadCount();
 	maxThreadCountSpinBox->setRange(1, idealThreadCount);
@@ -94,7 +92,7 @@ ccRegistrationDlg::ccRegistrationDlg(ccHObject *data, ccHObject *model, QWidget*
 		TzCheckBox->setChecked(s_transCheckboxes[2]);
 	}
 
-	connect(swapButton, SIGNAL(clicked()), this, SLOT(swapModelAndData()));
+	connect(swapButton, &QAbstractButton::clicked, this, &ccRegistrationDlg::swapModelAndData);
 }
 
 ccRegistrationDlg::~ccRegistrationDlg()

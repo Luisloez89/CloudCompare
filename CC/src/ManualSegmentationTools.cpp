@@ -16,22 +16,18 @@
 //#                                                                        #
 //##########################################################################
 
-#include "ManualSegmentationTools.h"
+#include <ManualSegmentationTools.h>
 
 //local
-#include "SquareMatrix.h"
-#include "CCTypes.h"
-#include "GenericProgressCallback.h"
-#include "GenericIndexedCloudPersist.h"
-#include "ReferenceCloud.h"
-#include "GenericIndexedMesh.h"
-#include "SimpleMesh.h"
-#include "Polyline.h"
-#include "ChunkedPointCloud.h"
+#include <PointCloud.h>
+#include <GenericProgressCallback.h>
+#include <Polyline.h>
+#include <SimpleMesh.h>
 
 //system
-#include <string.h>
-#include <assert.h>
+#include <cstdint>
+#include <map>
+
 
 using namespace CCLib;
 
@@ -39,7 +35,7 @@ ReferenceCloud* ManualSegmentationTools::segment(GenericIndexedCloudPersist* aCl
 {
 	assert(poly && aCloud);
 
-	CCLib::SquareMatrix* trans = (viewMat ? new CCLib::SquareMatrix(viewMat) : 0);
+	CCLib::SquareMatrix* trans = (viewMat ? new CCLib::SquareMatrix(viewMat) : nullptr);
 
 	ReferenceCloud* Y = new ReferenceCloud(aCloud);
 
@@ -63,7 +59,7 @@ ReferenceCloud* ManualSegmentationTools::segment(GenericIndexedCloudPersist* aCl
 			{
 				//not engouh memory
 				delete Y;
-				Y = 0;
+				Y = nullptr;
 				break;
 			}
 		}
@@ -112,7 +108,7 @@ bool ManualSegmentationTools::isPointInsidePoly(const CCVector2& P,
 												const std::vector<CCVector2>& polyVertices)
 {
 	//number of vertices
-	size_t vertCount = polyVertices.size();
+	std::size_t vertCount = polyVertices.size();
 	if (vertCount < 2)
 		return false;
 
@@ -146,7 +142,7 @@ ReferenceCloud* ManualSegmentationTools::segment(	GenericIndexedCloudPersist* cl
 	if (!cloud)
 	{
 		assert(false);
-		return 0;
+		return nullptr;
 	}
 
 	ReferenceCloud* Y = new ReferenceCloud(cloud);
@@ -162,7 +158,7 @@ ReferenceCloud* ManualSegmentationTools::segment(	GenericIndexedCloudPersist* cl
 			{
 				//not engouh memory
 				delete Y;
-				Y=0;
+				Y = nullptr;
 				break;
 			}
 		}
@@ -174,7 +170,7 @@ ReferenceCloud* ManualSegmentationTools::segment(	GenericIndexedCloudPersist* cl
 GenericIndexedMesh* ManualSegmentationTools::segmentMesh(GenericIndexedMesh* theMesh, ReferenceCloud* pointIndexes, bool pointsWillBeInside, GenericProgressCallback* progressCb, GenericIndexedCloud* destCloud, unsigned indexShift)
 {
 	if (!theMesh || !pointIndexes || !pointIndexes->getAssociatedCloud())
-		return 0;
+		return nullptr;
 
 	//by default we try a fast process (but with a higher memory consumption)
 	unsigned numberOfPoints = pointIndexes->getAssociatedCloud()->size();
@@ -190,7 +186,7 @@ GenericIndexedMesh* ManualSegmentationTools::segmentMesh(GenericIndexedMesh* the
 		}
 		catch (const std::bad_alloc&)
 		{
-			return 0; //not enough memory
+			return nullptr; //not enough memory
 		}
 
 		for (unsigned i = 0; i < numberOfIndexes; ++i)
@@ -209,7 +205,7 @@ GenericIndexedMesh* ManualSegmentationTools::segmentMesh(GenericIndexedMesh* the
 	}
 
 	//create resulting mesh
-	SimpleMesh* newMesh = 0;
+	SimpleMesh* newMesh = nullptr;
 	{
 		unsigned numberOfTriangles = theMesh->size();
 
@@ -231,8 +227,8 @@ GenericIndexedMesh* ManualSegmentationTools::segmentMesh(GenericIndexedMesh* the
 		newMesh = new SimpleMesh(destCloud ? destCloud : pointIndexes->getAssociatedCloud());
 		unsigned count = 0;
 
-		theMesh->placeIteratorAtBegining();
-		for (unsigned i=0; i<numberOfTriangles; ++i)
+		theMesh->placeIteratorAtBeginning();
+		for (unsigned i = 0; i < numberOfTriangles; ++i)
 		{
 			bool triangleIsOnTheRightSide = true;
 
@@ -256,18 +252,18 @@ GenericIndexedMesh* ManualSegmentationTools::segmentMesh(GenericIndexedMesh* the
 			//if we keep the triangle
 			if (triangleIsOnTheRightSide)
 			{
-				if (count == newMesh->size() && !newMesh->reserve(newMesh->size() + 1000)) //auto expand mesh size
+				if (count == newMesh->capacity() && !newMesh->reserve(newMesh->size() + 4096)) //auto expand mesh size
 				{
 					//stop process
 					delete newMesh;
-					newMesh = 0;
+					newMesh = nullptr;
 					break;
 				}
-				++count;
 
 				newMesh->addTriangle(	indexShift + newVertexIndexes[0],
 										indexShift + newVertexIndexes[1],
 										indexShift + newVertexIndexes[2] );
+				++count;
 			}
 
 			if (progressCb && !nprogress.oneStep())
@@ -282,7 +278,7 @@ GenericIndexedMesh* ManualSegmentationTools::segmentMesh(GenericIndexedMesh* the
 			if (newMesh->size() == 0)
 			{
 				delete newMesh;
-				newMesh = 0;
+				newMesh = nullptr;
 			}
 			else if (count < newMesh->size())
 			{
@@ -297,22 +293,18 @@ GenericIndexedMesh* ManualSegmentationTools::segmentMesh(GenericIndexedMesh* the
 const unsigned c_origIndexFlag = 0x80000000; //original index flag (bit 31)
 const unsigned c_srcIndexFlag  = 0x40000000; //source index flag (bit 30)
 const unsigned c_realIndexMask = 0x3FFFFFFF; //original index mask (bit 0 to 29) --> max allowed index = 1073741823 ;)
-const unsigned c_defaultArrayGrowth = 100;
-
-#include <map>
-#include <stdint.h> //for uint fixed-sized types
+const unsigned c_defaultArrayGrowth = 1024;
 
 struct InsideOutsideIndexes
 {
 	InsideOutsideIndexes() : insideIndex(0), outsideIndex(0) {}
 	InsideOutsideIndexes(unsigned inside, unsigned outside) : insideIndex(inside), outsideIndex(outside) {}
-	InsideOutsideIndexes(const InsideOutsideIndexes& pmi) : insideIndex(pmi.insideIndex), outsideIndex(pmi.outsideIndex){}
 	unsigned insideIndex;
 	unsigned outsideIndex;
 };
 static std::map< uint64_t, InsideOutsideIndexes > s_edgePoint;
 
-bool AddVertex(CCVector3d& P, ChunkedPointCloud* vertices, unsigned& index)
+bool AddVertex(CCVector3d& P, PointCloud* vertices, unsigned& index)
 {
 	assert(vertices);
 	//add vertex to the 'vertices' set
@@ -333,7 +325,7 @@ bool ComputeEdgePoint(const CCVector3d& A, unsigned iA,
 	const CCVector3d& B, unsigned iB,
 	unsigned& iCoutside, unsigned& iCinside,
 	double planeCoord, unsigned char planeDim,
-	ChunkedPointCloud* outsideVertices, ChunkedPointCloud* insideVertices)
+	PointCloud* outsideVertices, PointCloud* insideVertices)
 {
 	assert(outsideVertices || insideVertices);
 
@@ -403,9 +395,9 @@ bool AddTriangle(unsigned iA, unsigned iB, unsigned iC,
 bool MergeOldTriangles(	GenericIndexedMesh* origMesh,
 						GenericIndexedCloudPersist* origVertices,
 						SimpleMesh* newMesh,
-						ChunkedPointCloud* newVertices,
+						PointCloud* newVertices,
 						const std::vector<unsigned>& preservedTriangleIndexes,
-						std::vector<unsigned>* origTriIndexesMap = 0)
+						std::vector<unsigned>* origTriIndexesMap = nullptr)
 {
 	assert(origMesh && origVertices && newMesh && newVertices);
 	
@@ -533,7 +525,7 @@ bool MergeOldTriangles(	GenericIndexedMesh* origMesh,
 
 bool ImportSourceVertices(GenericIndexedCloudPersist* srcVertices,
 							SimpleMesh* newMesh,
-							ChunkedPointCloud* newVertices)
+							PointCloud* newVertices)
 {
 	assert(srcVertices && newMesh && newVertices);
 
@@ -653,9 +645,9 @@ bool ManualSegmentationTools::segmentMeshWitAAPlane(GenericIndexedMesh* mesh,
 	std::vector<unsigned> preservedTrianglesMinus;
 	std::vector<unsigned> preservedTrianglesPlus;
 
-	ChunkedPointCloud* insideVertices = new ChunkedPointCloud;
+	PointCloud* insideVertices = new PointCloud;
 	SimpleMesh* minusMesh = new SimpleMesh(insideVertices, true);
-	ChunkedPointCloud* outsideVertices = new ChunkedPointCloud;
+	PointCloud* outsideVertices = new PointCloud;
 	SimpleMesh* plusMesh = new SimpleMesh(outsideVertices, true);
 
 	bool error = false;
@@ -937,24 +929,24 @@ bool ManualSegmentationTools::segmentMeshWitAABox(GenericIndexedMesh* origMesh,
 	std::vector<unsigned> preservedTrianglesOutside;	//outside
 
 	//inside meshes (swapped for each dimension)
-	ChunkedPointCloud* insideVertices1 = new ChunkedPointCloud;
+	PointCloud* insideVertices1 = new PointCloud;
 	SimpleMesh* insideMesh1 = new SimpleMesh(insideVertices1, true);
-	ChunkedPointCloud* insideVertices2 = new ChunkedPointCloud;
+	PointCloud* insideVertices2 = new PointCloud;
 	SimpleMesh* insideMesh2 = new SimpleMesh(insideVertices2, true);
 	
 	//outside mesh (output)
-	ChunkedPointCloud* outsideVertices = 0;
-	SimpleMesh* outsideMesh = 0;
+	PointCloud* outsideVertices = nullptr;
+	SimpleMesh* outsideMesh = nullptr;
 	if (ioParams.generateOutsideMesh)
 	{
-		outsideVertices = new ChunkedPointCloud;
+		outsideVertices = new PointCloud;
 		outsideMesh = new SimpleMesh(outsideVertices, true);
 	}
 
 	//pointers on input and output structures (will change for each dimension)
 	std::vector<unsigned>* preservedTrianglesInside = &preservedTrianglesInside1;
 	std::vector<unsigned>* formerPreservedTriangles = &preservedTrianglesInside2;
-	ChunkedPointCloud* insideVertices = insideVertices1;
+	PointCloud* insideVertices = insideVertices1;
 	SimpleMesh* insideMesh = insideMesh1;
 	GenericIndexedMesh* sourceMesh = origMesh;
 	GenericIndexedCloudPersist* sourceVertices = origVertices;
@@ -1000,7 +992,7 @@ bool ManualSegmentationTools::segmentMeshWitAABox(GenericIndexedMesh* origMesh,
 			{
 				bool triangleIsOriginal = false;
 				unsigned souceTriIndex = 0;
-				const VerticesIndexes* tsi = 0;
+				const VerticesIndexes* tsi = nullptr;
 				if (i < sourceTriCount)
 				{
 					souceTriIndex = i;
@@ -1324,7 +1316,7 @@ bool ManualSegmentationTools::segmentMeshWitAABox(GenericIndexedMesh* origMesh,
 				if (insideMesh == insideMesh1)
 				{
 					assert(sourceMesh == insideMesh2 || sourceMesh == origMesh);
-					insideMesh2->clear(false);
+					insideMesh2->clear();
 					insideVertices2->clear();
 					sourceMesh = insideMesh1;
 					sourceVertices = insideVertices1;
@@ -1337,7 +1329,7 @@ bool ManualSegmentationTools::segmentMeshWitAABox(GenericIndexedMesh* origMesh,
 				else
 				{
 					assert(sourceMesh == insideMesh1 || sourceMesh == origMesh);
-					insideMesh1->clear(false);
+					insideMesh1->clear();
 					insideVertices1->clear();
 					sourceMesh = insideMesh2;
 					sourceVertices = insideVertices2;
@@ -1384,14 +1376,14 @@ bool ManualSegmentationTools::segmentMeshWitAABox(GenericIndexedMesh* origMesh,
 	if (insideMesh == insideMesh1)
 	{
 		delete insideMesh2;
-		insideMesh2 = 0;
-		insideVertices2 = 0;
+		insideMesh2 = nullptr;
+		insideVertices2 = nullptr;
 	}
 	else
 	{
 		delete insideMesh1;
-		insideMesh1 = 0;
-		insideVertices1 = 0;
+		insideMesh1 = nullptr;
+		insideVertices1 = nullptr;
 	}
 
 	if (error)

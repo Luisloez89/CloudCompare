@@ -27,7 +27,14 @@ struct CLEntityDesc
 	QString path;
 	int indexInFile;
 
-	CLEntityDesc(QString filename, int _indexInFile = -1)
+	CLEntityDesc( const QString &name )
+		: basename( name )
+		, path( QDir::currentPath() )
+		, indexInFile( -1 )
+	{	
+	}
+	
+	CLEntityDesc(const QString &filename, int _indexInFile)
 		: indexInFile(_indexInFile)
 	{
 		if (filename.isNull())
@@ -43,7 +50,7 @@ struct CLEntityDesc
 		}
 	}
 	
-	CLEntityDesc(QString _basename, QString _path, int _indexInFile = -1)
+	CLEntityDesc(const QString &_basename, const QString &_path, int _indexInFile = -1)
 		: basename(_basename)
 		, path(_path)
 		, indexInFile(_indexInFile)
@@ -51,6 +58,7 @@ struct CLEntityDesc
 	}
 	
 	virtual ccHObject* getEntity() = 0;
+	virtual const ccHObject* getEntity() const = 0;
 };
 
 //! Loaded group description
@@ -65,7 +73,8 @@ struct CLGroupDesc : CLEntityDesc
 		, groupEntity(group)
 	{}
 
-	virtual ccHObject* getEntity() { return groupEntity; }
+	virtual ccHObject* getEntity() override { return groupEntity; }
+	virtual const ccHObject* getEntity() const override { return groupEntity; }
 };
 
 //! Loaded cloud description
@@ -73,7 +82,10 @@ struct CLCloudDesc : CLEntityDesc
 {
 	ccPointCloud* pc;
 
-	CLCloudDesc() : CLEntityDesc("Unnamed cloud") {}
+	CLCloudDesc()
+		: CLEntityDesc("Unnamed cloud")
+		, pc( nullptr )
+	{}
 
 	CLCloudDesc(ccPointCloud* cloud,
 				QString filename = QString(),
@@ -90,7 +102,8 @@ struct CLCloudDesc : CLEntityDesc
 		, pc(cloud)
 	{}
 
-	virtual ccHObject* getEntity() { return static_cast<ccHObject*>(pc); }
+	virtual ccHObject* getEntity() override { return static_cast<ccHObject*>(pc); }
+	virtual const ccHObject* getEntity() const override { return static_cast<ccHObject*>(pc); }
 };
 
 //! Loaded mesh description
@@ -98,7 +111,10 @@ struct CLMeshDesc : CLEntityDesc
 {
 	ccGenericMesh* mesh;
 
-	CLMeshDesc() : CLEntityDesc("Unnamed mesh") {}
+	CLMeshDesc()
+		: CLEntityDesc("Unnamed mesh")
+		, mesh( nullptr )
+	{}
 
 	CLMeshDesc(	ccGenericMesh* _mesh,
 				QString filename = QString(),
@@ -115,7 +131,8 @@ struct CLMeshDesc : CLEntityDesc
 		, mesh(_mesh)
 	{}
 
-	virtual ccHObject* getEntity() { return static_cast<ccHObject*>(mesh); }
+	virtual ccHObject* getEntity() override { return static_cast<ccHObject*>(mesh); }
+	virtual const ccHObject* getEntity() const override { return static_cast<ccHObject*>(mesh); }
 };
 
 //! Command line interface
@@ -167,6 +184,13 @@ public: //virtual methods
 	**/
 	virtual bool registerCommand(Command::Shared command) = 0;
 
+	//! Returns the name of a to-be-exported entity
+	virtual QString getExportFilename(	const CLEntityDesc& entityDesc,
+										QString extension = QString(),
+										QString suffix = QString(),
+										QString* baseOutputFilename = 0,
+										bool forceNoTimestamp = false) const = 0;
+
 	//! Exports a cloud or a mesh
 	/** \return error string (if any)
 	**/
@@ -181,14 +205,14 @@ public: //virtual methods
 		\param allAtOnce whether to save all clouds in the same file or one cloud per file
 		\return success
 	**/
-	virtual bool saveClouds(QString suffix = QString(), bool allAtOnce = false) = 0;
+	virtual bool saveClouds(QString suffix = QString(), bool allAtOnce = false, const QString* allAtOnceFileName = 0) = 0;
 
 	//! Saves all meshes
 	/** \param suffix optional suffix
 		\param allAtOnce whether to save all meshes in the same file or one mesh per file
 		\return success
 	**/
-	virtual bool saveMeshes(QString suffix = QString(), bool allAtOnce = false) = 0;
+	virtual bool saveMeshes(QString suffix = QString(), bool allAtOnce = false, const QString* allAtOnceFileName = 0) = 0;
 
 	//! Removes all clouds (or only the last one ;)
 	virtual void removeClouds(bool onlyLast = false) = 0;

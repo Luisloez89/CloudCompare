@@ -46,17 +46,6 @@
 #define CC_DEFAULT_DIP_DIR_SF_NAME "Dip direction (degrees)"
 #define CC_DEFAULT_MESH_VERT_FLAGS_SF_NAME "Vertex type"
 #define CC_DEFAULT_ID_SF_NAME "Id"
-
-//Qt
-#include <QString>
-
-//! Common parameters and other stuff
-class ccCommon
-{
-public:
-
-	//! Returns current software version
-	static QString GetCCVersion(bool full = true);
-};
+#define CC_ORIGINAL_CLOUD_INDEX_SF_NAME "Original cloud index"
 
 #endif

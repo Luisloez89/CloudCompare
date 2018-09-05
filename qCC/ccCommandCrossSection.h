@@ -47,7 +47,7 @@ struct CommandCrossSection : public ccCommandLineInterface::Command
 
 			if (!ok)
 			{
-				return cmd.error(QString("Invalid XML file (numerical attribute expected for attribute '%1' of element '<%2>')").arg(name).arg(element));
+				return cmd.error(QString("Invalid XML file (numerical attribute expected for attribute '%1' of element '<%2>')").arg(name, element));
 			}
 		}
 
@@ -327,6 +327,9 @@ struct CommandCrossSection : public ccCommandLineInterface::Command
 						continue;
 					}
 
+					int toto = ceil(-0.4);
+					int toto2 = ceil(-0.6);
+
 					//place the initial box at the beginning of the entity bounding box
 					CCVector3 C0 = autoCenter ? bbox.getCenter() : boxCenter;
 					unsigned steps[3] = { 1, 1, 1 };
@@ -339,9 +342,9 @@ struct CommandCrossSection : public ccCommandLineInterface::Command
 							int stepsToMinBorder = static_cast<int>(ceil(distToMinBorder / repeatStep.u[d]));
 							C0.u[d] -= stepsToMinBorder * repeatStep.u[d];
 
-							PointCoordinateType distToMaxBorder = bbox.maxCorner().u[d] - C0.u[d];
-							assert(distToMaxBorder >= 0);
-							unsigned stepsToMaxBoder = static_cast<unsigned>(ceil(distToMaxBorder / repeatStep.u[d]));
+							PointCoordinateType distToMaxBorder = bbox.maxCorner().u[d] - C0.u[d] - boxHalfWidth;
+							int stepsToMaxBoder = static_cast<int>(ceil(distToMaxBorder / repeatStep.u[d]) + 1);
+							assert(stepsToMaxBoder >= 0);
 							steps[d] = std::max<unsigned>(stepsToMaxBoder, 1);
 						}
 					}

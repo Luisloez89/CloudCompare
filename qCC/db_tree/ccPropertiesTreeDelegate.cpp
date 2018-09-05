@@ -147,17 +147,17 @@ QSize ccPropertiesTreeDelegate::sizeHint(const QStyleOptionViewItem& option, con
 		case OBJECT_OCTREE_TYPE:
 		case OBJECT_COLOR_RAMP_STEPS:
 		case OBJECT_CLOUD_POINT_SIZE:
-			return QSize(50, 18);
+			return QSize(50, 24);
 		case OBJECT_COLOR_SOURCE:
 		case OBJECT_POLYLINE_WIDTH:
 		case OBJECT_CURRENT_COLOR_RAMP:
-			return QSize(70, 22);
+			return QSize(70, 24);
 		case OBJECT_CLOUD_SF_EDITOR:
 			return QSize(250, 200);
 		case OBJECT_SENSOR_MATRIX_EDITOR:
 		case OBJECT_HISTORY_MATRIX_EDITOR:
 		case OBJECT_GLTRANS_MATRIX_EDITOR:
-			return QSize(250, 120);
+			return QSize(250, 140);
 		}
 	}
 
@@ -254,19 +254,19 @@ void ccPropertiesTreeDelegate::fillModel(ccHObject* hObject)
 	}
 	else if (m_currentObject->isA(CC_TYPES::NORMAL_INDEXES_ARRAY))
 	{
-		fillWithChunkedArray(static_cast<NormsIndexesTableType*>(m_currentObject));
+		fillWithCCArray(static_cast<NormsIndexesTableType*>(m_currentObject));
 	}
 	else if (m_currentObject->isA(CC_TYPES::TEX_COORDS_ARRAY))
 	{
-		fillWithChunkedArray(static_cast<TextureCoordsContainer*>(m_currentObject));
+		fillWithCCArray(static_cast<TextureCoordsContainer*>(m_currentObject));
 	}
 	else if (m_currentObject->isA(CC_TYPES::NORMALS_ARRAY))
 	{
-		fillWithChunkedArray(static_cast<NormsTableType*>(m_currentObject));
+		fillWithCCArray(static_cast<NormsTableType*>(m_currentObject));
 	}
 	else if (m_currentObject->isA(CC_TYPES::RGB_COLOR_ARRAY))
 	{
-		fillWithChunkedArray(static_cast<ColorsTableType*>(m_currentObject));
+		fillWithCCArray(static_cast<ColorsTableType*>(m_currentObject));
 	}
 	else if (m_currentObject->isA(CC_TYPES::TRANS_BUFFER))
 	{
@@ -288,16 +288,19 @@ void ccPropertiesTreeDelegate::fillModel(ccHObject* hObject)
 			addSeparator("Display transformation");
 			appendWideRow(PERSISTENT_EDITOR(OBJECT_GLTRANS_MATRIX_EDITOR));
 		}
-
-		fillWithMetaData(m_currentObject);
 	}
+
+	//meta-data
+	fillWithMetaData(m_currentObject);
 
 	//go back to original position
 	if (scrollPos > 0)
 		m_view->verticalScrollBar()->setSliderPosition(scrollPos);
 
 	if (m_model)
-		connect(m_model, SIGNAL(itemChanged(QStandardItem*)), this, SLOT(updateItem(QStandardItem*)));
+	{
+		connect(m_model, &QStandardItemModel::itemChanged, this, &ccPropertiesTreeDelegate::updateItem);
+	}
 }
 
 void ccPropertiesTreeDelegate::appendRow(QStandardItem* leftItem, QStandardItem* rightItem, bool openPersistentEditor/*=false*/)
@@ -952,7 +955,7 @@ void ccPropertiesTreeDelegate::fillWithShareable(CCShareable* _obj)
 	appendRow(ITEM("Shared"), ITEM(linkCount < 3 ? QString("No") : QString("Yes (%1)").arg(linkCount - 1)));
 }
 
-template<int N, class ElementType> void ccPropertiesTreeDelegate::fillWithChunkedArray(ccChunkedArray<N, ElementType>* _obj)
+template<class Type, int N, class ComponentType> void ccPropertiesTreeDelegate::fillWithCCArray(ccArray<Type, N, ComponentType>* _obj)
 {
 	assert(_obj && m_model);
 
@@ -962,15 +965,15 @@ template<int N, class ElementType> void ccPropertiesTreeDelegate::fillWithChunke
 	appendRow(ITEM("Name"), ITEM(_obj->getName().isEmpty() ? "undefined" : _obj->getName()));
 
 	//Count
-	appendRow(ITEM("Elements"), ITEM(QLocale(QLocale::English).toString(_obj->currentSize())));
+	appendRow(ITEM("Elements"), ITEM(QLocale(QLocale::English).toString(static_cast<qulonglong>(_obj->size()))));
 
 	//Capacity
-	appendRow(ITEM("Capacity"), ITEM(QLocale(QLocale::English).toString(_obj->capacity())));
+	appendRow(ITEM("Capacity"), ITEM(QLocale(QLocale::English).toString(static_cast<qulonglong>(_obj->capacity()))));
 
 	//Memory
-	appendRow(ITEM("Memory"), ITEM(QString("%1 Mb").arg((double)_obj->memory() / 1048576.0, 0, 'f', 2)));
+	appendRow(ITEM("Memory"), ITEM(QString("%1 Mb").arg((_obj->capacity() * sizeof(Type)) / 1048576.0, 0, 'f', 2)));
 
-	//ccChunkedArray objects are 'shareable'
+	//ccArray objects are 'Shareable'
 	fillWithShareable(_obj);
 }
 
@@ -996,21 +999,21 @@ QWidget* ccPropertiesTreeDelegate::createEditor(QWidget *parent,
 	const QModelIndex &index) const
 {
 	if (!m_model || !m_currentObject)
-		return NULL;
+		return nullptr;
 
 	QStandardItem* item = m_model->itemFromIndex(index);
 
 	if (!item || !item->data().isValid())
-		return NULL;
+		return nullptr;
 
 	int itemData = item->data().toInt();
 	if (item->column() == 0 && !isWideEditor(itemData))
 	{
 		//on the first column, only editors spanning on 2 columns are allowed
-		return NULL;
+		return nullptr;
 	}
 
-	QWidget* outputWidget = 0;
+	QWidget* outputWidget = nullptr;
 
 	switch (itemData)
 	{
@@ -1028,7 +1031,8 @@ QWidget* ccPropertiesTreeDelegate::createEditor(QWidget *parent,
 			comboBox->addItem(glWindows[i]->windowTitle());
 		}
 
-		connect(comboBox, SIGNAL(currentIndexChanged(const QString)), this, SLOT(objectDisplayChanged(const QString&)));
+		connect(comboBox, static_cast<void (QComboBox::*)(const QString &)>(&QComboBox::currentIndexChanged),
+				this, &ccPropertiesTreeDelegate::objectDisplayChanged);
 
 		outputWidget = comboBox;
 	}
@@ -1045,7 +1049,8 @@ QWidget* ccPropertiesTreeDelegate::createEditor(QWidget *parent,
 		for (int i = 0; i < nsf; ++i)
 			comboBox->addItem(QString(cloud->getScalarFieldName(i)));
 
-		connect(comboBox, SIGNAL(activated(int)), this, SLOT(scalarFieldChanged(int)));
+		connect(comboBox, static_cast<void (QComboBox::*)(int)>(&QComboBox::activated),
+				this, &ccPropertiesTreeDelegate::scalarFieldChanged);
 
 		outputWidget = comboBox;
 	}
@@ -1055,8 +1060,8 @@ QWidget* ccPropertiesTreeDelegate::createEditor(QWidget *parent,
 		ccColorScaleSelector* selector = new ccColorScaleSelector(ccColorScalesManager::GetUniqueInstance(), parent, QString::fromUtf8(":/CC/images/ccGear.png"));
 		//fill combobox box with Color Scales Manager
 		selector->init();
-		connect(selector, SIGNAL(colorScaleSelected(int)), this, SLOT(colorScaleChanged(int)));
-		connect(selector, SIGNAL(colorScaleEditorSummoned()), this, SLOT(spawnColorRampEditor()));
+		connect(selector, &ccColorScaleSelector::colorScaleSelected, this, &ccPropertiesTreeDelegate::colorScaleChanged);
+		connect(selector, &ccColorScaleSelector::colorScaleEditorSummoned, this, &ccPropertiesTreeDelegate::spawnColorRampEditor);
 
 		outputWidget = selector;
 	}
@@ -1067,7 +1072,8 @@ QWidget* ccPropertiesTreeDelegate::createEditor(QWidget *parent,
 		spinBox->setRange(ccColorScale::MIN_STEPS, ccColorScale::MAX_STEPS);
 		spinBox->setSingleStep(4);
 
-		connect(spinBox, SIGNAL(valueChanged(int)), this, SLOT(colorRampStepsChanged(int)));
+		connect(spinBox, static_cast<void (QSpinBox::*)(int)>(&QSpinBox::valueChanged),
+				this, &ccPropertiesTreeDelegate::colorRampStepsChanged);
 
 		outputWidget = spinBox;
 	}
@@ -1082,7 +1088,7 @@ QWidget* ccPropertiesTreeDelegate::createEditor(QWidget *parent,
 		//sfd->setSizePolicy(QSizePolicy::Minimum,QSizePolicy::Maximum);
 		//parent->setSizePolicy(QSizePolicy::Minimum,QSizePolicy::Maximum);
 
-		connect(sfd, SIGNAL(entitySFHasChanged()), this, SLOT(updateDisplay()));
+		connect(sfd, &sfEditDlg::entitySFHasChanged, this, &ccPropertiesTreeDelegate::updateDisplay);
 
 		outputWidget = sfd;
 	}
@@ -1116,7 +1122,8 @@ QWidget* ccPropertiesTreeDelegate::createEditor(QWidget *parent,
 		comboBox->addItem("Points", QVariant(ccOctree::MEAN_POINTS));
 		comboBox->addItem("Plain cubes", QVariant(ccOctree::MEAN_CUBES));
 
-		connect(comboBox, SIGNAL(activated(int)), this, SLOT(octreeDisplayModeChanged(int)));
+		connect(comboBox, static_cast<void (QComboBox::*)(int)>(&QComboBox::activated),
+				this, &ccPropertiesTreeDelegate::octreeDisplayModeChanged);
 
 		outputWidget = comboBox;
 	}
@@ -1126,7 +1133,8 @@ QWidget* ccPropertiesTreeDelegate::createEditor(QWidget *parent,
 		QSpinBox* spinBox = new QSpinBox(parent);
 		spinBox->setRange(1, CCLib::DgmOctree::MAX_OCTREE_LEVEL);
 
-		connect(spinBox, SIGNAL(valueChanged(int)), this, SLOT(octreeDisplayedLevelChanged(int)));
+		connect(spinBox, static_cast<void (QSpinBox::*)(int)>(&QSpinBox::valueChanged),
+				this, &ccPropertiesTreeDelegate::octreeDisplayedLevelChanged);
 
 		outputWidget = spinBox;
 	}
@@ -1137,7 +1145,8 @@ QWidget* ccPropertiesTreeDelegate::createEditor(QWidget *parent,
 		spinBox->setRange(4, 360);
 		spinBox->setSingleStep(4);
 
-		connect(spinBox, SIGNAL(valueChanged(int)), this, SLOT(primitivePrecisionChanged(int)));
+		connect(spinBox, static_cast<void (QSpinBox::*)(int)>(&QSpinBox::valueChanged),
+				this, &ccPropertiesTreeDelegate::primitivePrecisionChanged);
 
 		outputWidget = spinBox;
 	}
@@ -1149,7 +1158,8 @@ QWidget* ccPropertiesTreeDelegate::createEditor(QWidget *parent,
 		spinBox->setRange(0, 1.0e6);
 		spinBox->setSingleStep(1.0);
 
-		connect(spinBox, SIGNAL(valueChanged(double)), this, SLOT(sphereRadiusChanged(double)));
+		connect(spinBox, static_cast<void (QDoubleSpinBox::*)(double)>(&QDoubleSpinBox::valueChanged),
+				this, &ccPropertiesTreeDelegate::sphereRadiusChanged);
 
 		outputWidget = spinBox;
 	}
@@ -1161,7 +1171,8 @@ QWidget* ccPropertiesTreeDelegate::createEditor(QWidget *parent,
 		spinBox->setRange(0, 1.0e6);
 		spinBox->setSingleStep(1.0);
 
-		connect(spinBox, SIGNAL(valueChanged(double)), this, SLOT(coneHeightChanged(double)));
+		connect(spinBox, static_cast<void (QDoubleSpinBox::*)(double)>(&QDoubleSpinBox::valueChanged),
+				this, &ccPropertiesTreeDelegate::coneHeightChanged);
 
 		outputWidget = spinBox;
 	}
@@ -1173,7 +1184,8 @@ QWidget* ccPropertiesTreeDelegate::createEditor(QWidget *parent,
 		spinBox->setRange(0, 1.0e6);
 		spinBox->setSingleStep(1.0);
 
-		connect(spinBox, SIGNAL(valueChanged(double)), this, SLOT(coneBottomRadiusChanged(double)));
+		connect(spinBox, static_cast<void (QDoubleSpinBox::*)(double)>(&QDoubleSpinBox::valueChanged),
+				this, &ccPropertiesTreeDelegate::coneBottomRadiusChanged);
 
 		outputWidget = spinBox;
 	}
@@ -1185,7 +1197,8 @@ QWidget* ccPropertiesTreeDelegate::createEditor(QWidget *parent,
 		spinBox->setRange(0, 1.0e6);
 		spinBox->setSingleStep(1.0);
 
-		connect(spinBox, SIGNAL(valueChanged(double)), this, SLOT(coneTopRadiusChanged(double)));
+		connect(spinBox, static_cast<void (QDoubleSpinBox::*)(double)>(&QDoubleSpinBox::valueChanged),
+				this, &ccPropertiesTreeDelegate::coneTopRadiusChanged);
 
 		outputWidget = spinBox;
 	}
@@ -1197,7 +1210,7 @@ QWidget* ccPropertiesTreeDelegate::createEditor(QWidget *parent,
 		slider->setSingleStep(1);
 		slider->setPageStep(16);
 		slider->setTickPosition(QSlider::NoTicks);
-		connect(slider, SIGNAL(valueChanged(int)), this, SLOT(imageAlphaChanged(int)));
+		connect(slider, &QAbstractSlider::valueChanged, this, &ccPropertiesTreeDelegate::imageAlphaChanged);
 
 		outputWidget = slider;
 	}
@@ -1214,7 +1227,8 @@ QWidget* ccPropertiesTreeDelegate::createEditor(QWidget *parent,
 		spinBox->setRange(minIndex, maxIndex);
 		spinBox->setSingleStep((maxIndex - minIndex) / 1000.0);
 
-		connect(spinBox, SIGNAL(valueChanged(double)), this, SLOT(sensorIndexChanged(double)));
+		connect(spinBox, static_cast<void (QDoubleSpinBox::*)(double)>(&QDoubleSpinBox::valueChanged),
+				this, &ccPropertiesTreeDelegate::sensorIndexChanged);
 
 		outputWidget = spinBox;
 	}
@@ -1226,7 +1240,8 @@ QWidget* ccPropertiesTreeDelegate::createEditor(QWidget *parent,
 		spinBox->setDecimals(3);
 		spinBox->setSingleStep(1.0);
 
-		connect(spinBox, SIGNAL(valueChanged(double)), this, SLOT(trihedronsScaleChanged(double)));
+		connect(spinBox, static_cast<void (QDoubleSpinBox::*)(double)>(&QDoubleSpinBox::valueChanged),
+				this, &ccPropertiesTreeDelegate::trihedronsScaleChanged);
 
 		outputWidget = spinBox;
 	}
@@ -1234,7 +1249,7 @@ QWidget* ccPropertiesTreeDelegate::createEditor(QWidget *parent,
 	case OBJECT_APPLY_IMAGE_VIEWPORT:
 	{
 		QPushButton* button = new QPushButton("Apply", parent);
-		connect(button, SIGNAL(clicked()), this, SLOT(applyImageViewport()));
+		connect(button, &QAbstractButton::clicked, this, &ccPropertiesTreeDelegate::applyImageViewport);
 
 		button->setMinimumHeight(30);
 
@@ -1244,7 +1259,7 @@ QWidget* ccPropertiesTreeDelegate::createEditor(QWidget *parent,
 	case OBJECT_APPLY_SENSOR_VIEWPORT:
 	{
 		QPushButton* button = new QPushButton("Apply", parent);
-		connect(button, SIGNAL(clicked()), this, SLOT(applySensorViewport()));
+		connect(button, &QAbstractButton::clicked, this, &ccPropertiesTreeDelegate::applySensorViewport);
 
 		button->setMinimumHeight(30);
 
@@ -1254,7 +1269,7 @@ QWidget* ccPropertiesTreeDelegate::createEditor(QWidget *parent,
 	case OBJECT_APPLY_LABEL_VIEWPORT:
 	{
 		QPushButton* button = new QPushButton("Apply", parent);
-		connect(button, SIGNAL(clicked()), this, SLOT(applyLabelViewport()));
+		connect(button, &QAbstractButton::clicked, this, &ccPropertiesTreeDelegate::applyLabelViewport);
 
 		button->setMinimumHeight(30);
 		outputWidget = button;
@@ -1263,7 +1278,7 @@ QWidget* ccPropertiesTreeDelegate::createEditor(QWidget *parent,
 	case OBJECT_UPDATE_LABEL_VIEWPORT:
 	{
 		QPushButton* button = new QPushButton("Update", parent);
-		connect(button, SIGNAL(clicked()), this, SLOT(updateLabelViewport()));
+		connect(button, &QAbstractButton::clicked, this, &ccPropertiesTreeDelegate::updateLabelViewport);
 
 		button->setMinimumHeight(30);
 		outputWidget = button;
@@ -1273,7 +1288,7 @@ QWidget* ccPropertiesTreeDelegate::createEditor(QWidget *parent,
 	{
 		QLineEdit* lineEdit = new QLineEdit(parent);
 		lineEdit->setValidator(new QDoubleValidator(1.0e-8, 1.0, 8, lineEdit));
-		connect(lineEdit, SIGNAL(editingFinished()), this, SLOT(sensorUncertaintyChanged()));
+		connect(lineEdit, &QLineEdit::editingFinished, this, &ccPropertiesTreeDelegate::sensorUncertaintyChanged);
 
 		outputWidget = lineEdit;
 	}
@@ -1285,7 +1300,8 @@ QWidget* ccPropertiesTreeDelegate::createEditor(QWidget *parent,
 		spinBox->setDecimals(3);
 		spinBox->setSingleStep(1.0e-1);
 
-		connect(spinBox, SIGNAL(valueChanged(double)), this, SLOT(sensorScaleChanged(double)));
+		connect(spinBox, static_cast<void (QDoubleSpinBox::*)(double)>(&QDoubleSpinBox::valueChanged),
+				this, &ccPropertiesTreeDelegate::sensorScaleChanged);
 
 		outputWidget = spinBox;
 	}
@@ -1295,10 +1311,11 @@ QWidget* ccPropertiesTreeDelegate::createEditor(QWidget *parent,
 		QComboBox *comboBox = new QComboBox(parent);
 
 		comboBox->addItem(c_defaultPointSizeString); //size = 0
-		for (unsigned i = 1; i <= 10; ++i)
+		for (int i = static_cast<int>(ccGLWindow::MIN_POINT_SIZE_F); i <= static_cast<int>(ccGLWindow::MAX_POINT_SIZE_F); ++i)
 			comboBox->addItem(QString::number(i));
 
-		connect(comboBox, SIGNAL(currentIndexChanged(int)), this, SLOT(cloudPointSizeChanged(int)));
+		connect(comboBox, static_cast<void (QComboBox::*)(int)>(&QComboBox::currentIndexChanged),
+				this, &ccPropertiesTreeDelegate::cloudPointSizeChanged);
 
 		outputWidget = comboBox;
 	}
@@ -1308,10 +1325,11 @@ QWidget* ccPropertiesTreeDelegate::createEditor(QWidget *parent,
 		QComboBox *comboBox = new QComboBox(parent);
 
 		comboBox->addItem(c_defaultPolyWidthSizeString); //size = 0
-		for (unsigned i = 1; i <= 10; ++i)
+		for (int i = static_cast<int>(ccGLWindow::MIN_LINE_WIDTH_F); i <= static_cast<int>(ccGLWindow::MAX_LINE_WIDTH_F); ++i)
 			comboBox->addItem(QString::number(i));
 
-		connect(comboBox, SIGNAL(currentIndexChanged(int)), this, SLOT(polyineWidthChanged(int)));
+		connect(comboBox, static_cast<void (QComboBox::*)(int)>(&QComboBox::currentIndexChanged),
+				this, &ccPropertiesTreeDelegate::polyineWidthChanged);
 
 		outputWidget = comboBox;
 	}
@@ -1333,7 +1351,8 @@ QWidget* ccPropertiesTreeDelegate::createEditor(QWidget *parent,
 				comboBox->addItem(s_sfColor);
 				comboBox->setItemIcon(comboBox->count() - 1, QIcon(QString::fromUtf8(":/CC/images/typeSF.png")));
 			}
-			connect(comboBox, SIGNAL(currentIndexChanged(const QString)), this, SLOT(colorSourceChanged(const QString&)));
+			connect(comboBox, static_cast<void (QComboBox::*)(const QString &)>(&QComboBox::currentIndexChanged),
+					this, &ccPropertiesTreeDelegate::colorSourceChanged);
 		}
 
 		outputWidget = comboBox;
@@ -1640,6 +1659,13 @@ void ccPropertiesTreeDelegate::setEditorData(QWidget *editor, const QModelIndex 
 		SetComboBoxIndex(editor, static_cast<int>(cloud->getPointSize()));
 		break;
 	}
+	case OBJECT_POLYLINE_WIDTH:
+	{
+		ccPolyline* poly = ccHObjectCaster::ToPolyline(m_currentObject);
+		assert(poly);
+		SetComboBoxIndex(editor, static_cast<int>(poly->getWidth()));
+		break;
+	}
 	case OBJECT_COLOR_SOURCE:
 	{
 		int currentIndex = 0; //no color
@@ -1830,6 +1856,11 @@ void ccPropertiesTreeDelegate::updateDisplay()
 				object = parent;
 				objectIsDisplayed = true;
 			}
+		}
+		// Allows show name toggle on normally non-visible objects to update the screen
+		else if (object->isKindOf(CC_TYPES::HIERARCHY_OBJECT))
+		{
+			objectIsDisplayed = true;
 		}
 	}
 

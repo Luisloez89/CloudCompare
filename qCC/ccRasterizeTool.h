@@ -42,6 +42,29 @@ public:
 	//! Destructor
 	~ccRasterizeTool();
 
+public: //raster export
+
+	//! Bands to be exported
+	struct ExportBands
+	{
+		bool height = true;
+		bool rgb = false;
+		bool density = false;
+		bool visibleSF = false;
+		bool allSFs = false;
+	};
+
+	//! Exports a raster grid as a geotiff file
+	static bool ExportGeoTiff(	QString outputFilename,
+								const ExportBands& exportBands,
+								ccRasterGrid::EmptyCellFillOption fillEmptyCellsStrategy,
+								const ccRasterGrid& grid,
+								const ccBBox& gridBBox,
+								unsigned char Z,
+								double customHeightForEmptyCells = std::numeric_limits<double>::quiet_NaN(),
+								ccGenericPointCloud* originCloud = 0,
+								int visibleSfIndex = -1);
+
 protected slots:
 
 	//! Exports the grid as a cloud
@@ -144,6 +167,9 @@ protected: //standard methods
 
 	//! Tests if the dialog can be safely closed
 	bool canClose();
+
+	//! Adds a new contour line
+	void addNewContour(ccPolyline* poly, double height, unsigned subIndex);
 
 protected: //raster grid related stuff
 

@@ -35,6 +35,8 @@
 //! Mascaret File Save dialog
 class SaveMascaretFileDlg : public QDialog, public Ui::SaveMascaretFileDlg
 {
+	Q_OBJECT
+	
 public:
 	//! Default constructor
 	SaveMascaretFileDlg(QWidget* parent = 0)
@@ -73,7 +75,7 @@ inline void ToLocalAbscissa(const CCVector3& P, const CCVector3& C, const CCVect
 	localP.y = P.u[upDir];
 }
 
-CC_FILE_ERROR MascaretFilter::saveToFile(ccHObject* entity, QString filename, SaveParameters& parameters)
+CC_FILE_ERROR MascaretFilter::saveToFile(ccHObject* entity, const QString& filename, const SaveParameters& parameters)
 {
 	if (!entity || filename.isEmpty())
 		return CC_FERR_BAD_ARGUMENT;
@@ -308,3 +310,5 @@ CC_FILE_ERROR MascaretFilter::saveToFile(ccHObject* entity, QString filename, Sa
 
 	return result;
 }
+
+#include "MascaretFilter.moc"

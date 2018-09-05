@@ -1,12 +1,6 @@
-[submodule "plugins/qPoissonRecon/PoissonReconLib"]
-	path = plugins/qPoissonRecon/PoissonReconLib
+[submodule "plugins/core/qPoissonRecon/PoissonReconLib"]
+	path = plugins/core/qPoissonRecon/PoissonReconLib
 	url = https://github.com/cloudcompare/PoissonRecon
-[submodule "plugins/qHoughNormals/normals_Hough"]
-	path = plugins/qHoughNormals/normals_Hough
-	url = https://github.com/cloudcompare/normals_Hough
-[submodule "PoissonReconLib"]
-	path = PoissonReconLib
-	url = https://github.com/cloudcompare/PoissonRecon
-[submodule "plugins/qPoissonRecon/PoissonRecon"]
-	path = plugins/qPoissonRecon/PoissonRecon
-	url = https://github.com/cloudcompare/PoissonRecon
+[submodule "contrib/libE57Format"]
+	path = contrib/libE57Format
+	url = https://github.com/asmaloney/libE57Format

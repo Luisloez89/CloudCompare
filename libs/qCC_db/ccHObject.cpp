@@ -40,6 +40,8 @@
 #include "ccQuadric.h"
 #include "ccCustomObject.h"
 #include "ccExternalFactory.h"
+#include "ccPointCloud.h"
+#include "ccPolyline.h"
 
 //Qt
 #include <QIcon>
@@ -72,7 +74,7 @@ ccHObject::~ccHObject()
 	m_isDeleting = true;
 
 	//process dependencies
-	for (std::map<ccHObject*,int>::const_iterator it=m_dependencies.begin(); it!=m_dependencies.end(); ++it)
+	for (std::map<ccHObject*, int>::const_iterator it = m_dependencies.begin(); it != m_dependencies.end(); ++it)
 	{
 		assert(it->first);
 		//notify deletion to other object?
@@ -101,10 +103,13 @@ void ccHObject::notifyGeometryUpdate()
 {
 	//the associated display bounding-box is (potentially) deprecated!!!
 	if (m_currentDisplay)
+	{
 		m_currentDisplay->invalidateViewport();
+		m_currentDisplay->deprecate3DLayer();
+	}
 
 	//process dependencies
-	for (std::map<ccHObject*,int>::const_iterator it=m_dependencies.begin(); it!=m_dependencies.end(); ++it)
+	for (std::map<ccHObject*, int>::const_iterator it = m_dependencies.begin(); it != m_dependencies.end(); ++it)
 	{
 		assert(it->first);
 		//notify deletion to other object?
@@ -152,7 +157,7 @@ ccHObject* ccHObject::New(CC_CLASS_ENUM objectType, const char* name/*=0*/)
 	case CC_TYPES::IMAGE:
 		return new ccImage();
 	case CC_TYPES::CALIBRATED_IMAGE:
-		return 0; //deprecated
+		return nullptr; //deprecated
 	case CC_TYPES::GBL_SENSOR:
 		//warning: default sensor type set in constructor (see CCLib::GroundBasedLidarSensor::setRotationOrder)
 		return new ccGBLSensor();
@@ -261,12 +266,12 @@ void ccHObject::addDependency(ccHObject* otherObject, int flags, bool additive/*
 	//whenever we add a dependency, we must be sure to be notified
 	//by the other object when its deleted! Otherwise we'll keep
 	//bad pointers in the dependency list...
-	otherObject->addDependency(this,DP_NOTIFY_OTHER_ON_DELETE);
+	otherObject->addDependency(this, DP_NOTIFY_OTHER_ON_DELETE);
 }
 
 int ccHObject::getDependencyFlagsWith(const ccHObject* otherObject)
 {
-	std::map<ccHObject*,int>::const_iterator it = m_dependencies.find(const_cast<ccHObject*>(otherObject)); //DGM: not sure why erase won't accept a const pointer?! We try to modify the map here, not the pointer object!
+	std::map<ccHObject*, int>::const_iterator it = m_dependencies.find(const_cast<ccHObject*>(otherObject)); //DGM: not sure why erase won't accept a const pointer?! We try to modify the map here, not the pointer object!
 
 	return (it != m_dependencies.end() ? it->second : 0);
 }
@@ -275,7 +280,7 @@ void ccHObject::removeDependencyWith(ccHObject* otherObject)
 {
 	m_dependencies.erase(const_cast<ccHObject*>(otherObject)); //DGM: not sure why erase won't accept a const pointer?! We try to modify the map here, not the pointer object!
 	if (!otherObject->m_isDeleting)
-		otherObject->removeDependencyFlag(this,DP_NOTIFY_OTHER_ON_DELETE);
+		otherObject->removeDependencyFlag(this, DP_NOTIFY_OTHER_ON_DELETE);
 }
 
 void ccHObject::removeDependencyFlag(ccHObject* otherObject, DEPENDENCY_FLAGS flag)
@@ -304,7 +309,7 @@ void ccHObject::onDeletionOf(const ccHObject* obj)
 	if (pos >= 0)
 	{
 		//we can't swap children as we want to keep the order!
-		m_children.erase(m_children.begin()+pos);
+		m_children.erase(m_children.begin() + pos);
 	}
 }
 
@@ -444,7 +449,7 @@ void ccHObject::transferChildren(ccHObject& newParent, bool forceFatherDependent
 		int childDependencyFlags = child->getDependencyFlagsWith(this);
 		int fatherDependencyFlags = getDependencyFlagsWith(child);
 	
-		//we must explicitely remove any depedency with the child as we don't call 'detachChild'
+		//we must explicitely remove any dependency with the child as we don't call 'detachChild'
 		removeDependencyWith(child);
 		child->removeDependencyWith(this);
 
@@ -554,7 +559,12 @@ ccBBox ccHObject::getDisplayBB_recursive(bool relative, const ccGenericGLDisplay
 
 bool ccHObject::isDisplayed() const
 {
-	return isVisible() && (getDisplay() != 0) && isBranchEnabled();
+	return (getDisplay() != 0) && isVisible() && isBranchEnabled();
+}
+
+bool ccHObject::isDisplayedIn(ccGenericGLDisplay* display) const
+{
+	return (getDisplay() == display) && isVisible() && isBranchEnabled();
 }
 
 bool ccHObject::isBranchEnabled() const
@@ -570,6 +580,15 @@ bool ccHObject::isBranchEnabled() const
 
 void ccHObject::drawBB(CC_DRAW_CONTEXT& context, const ccColor::Rgb& col)
 {
+	QOpenGLFunctions_2_1 *glFunc = context.glFunctions<QOpenGLFunctions_2_1>();
+	assert(glFunc != nullptr);
+
+	if (glFunc == nullptr)
+		return;
+
+	glFunc->glPushAttrib(GL_LINE_BIT);
+	glFunc->glLineWidth(1.0f);
+
 	switch (m_selectionBehavior)
 	{
 	case SELECTION_AA_BBOX:
@@ -604,6 +623,8 @@ void ccHObject::drawBB(CC_DRAW_CONTEXT& context, const ccColor::Rgb& col)
 	default:
 		assert(false);
 	}
+
+	glFunc->glPopAttrib(); //GL_LINE_BIT
 }
 
 void ccHObject::drawNameIn3D(CC_DRAW_CONTEXT& context)
@@ -612,7 +633,7 @@ void ccHObject::drawNameIn3D(CC_DRAW_CONTEXT& context)
 		return;
 
 	//we display it in the 2D layer in fact!
-	ccBBox bBox = getOwnBB();
+	ccBBox bBox = getBB_recursive();
 	if (!bBox.isValid())
 		return;
 	
@@ -696,11 +717,13 @@ void ccHObject::draw(CC_DRAW_CONTEXT& context)
 			{
 				toggleClipPlanes(context, false);
 			}
-
-			//draw name in 3D (we display it in the 2D foreground layer in fact!)
-			if (m_showNameIn3D && MACRO_Draw2D(context) && MACRO_Foreground(context) && !MACRO_DrawEntityNames(context))
-				drawNameIn3D(context);
 		}
+	}
+
+	//draw name - container objects are not visible but can still show a name
+	if (m_currentDisplay == context.display && m_showNameIn3D && MACRO_Draw2D(context) && MACRO_Foreground(context) && !MACRO_DrawEntityNames(context))
+	{
+		drawNameIn3D(context);
 	}
 
 	//draw entity's children
@@ -722,7 +745,7 @@ void ccHObject::applyGLTransformation(const ccGLMatrix& trans)
 	m_glTransHistory = trans * m_glTransHistory;
 }
 
-void ccHObject::applyGLTransformation_recursive(const ccGLMatrix* transInput/*=NULL*/)
+void ccHObject::applyGLTransformation_recursive(const ccGLMatrix* transInput/*=nullptr*/)
 {
 	ccGLMatrix transTemp;
 	const ccGLMatrix* transToApply = transInput;
@@ -828,7 +851,7 @@ void ccHObject::removeChild(int pos)
 	//we can't swap as we want to keep the order!
 	//(DGM: do this BEFORE deleting the object (otherwise
 	//the dependency mechanism can 'backfire' ;)
-	m_children.erase(m_children.begin()+pos);
+	m_children.erase(m_children.begin() + pos);
 
 	//backup dependency flags
 	int flags = getDependencyFlagsWith(child);
@@ -937,7 +960,7 @@ bool ccHObject::fromFile(QFile& in, short dataVersion, int flags)
 		ccHObject* child = New(classID);
 
 		//specifc case of custom objects (defined by plugins)
-		if (classID == CC_TYPES::CUSTOM_H_OBJECT)
+		if ((classID & CC_TYPES::CUSTOM_H_OBJECT) == CC_TYPES::CUSTOM_H_OBJECT)
 		{
 			//store current position
 			size_t originalFilePos = in.pos();

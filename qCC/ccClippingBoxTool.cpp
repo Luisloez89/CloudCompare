@@ -18,32 +18,20 @@
 #include "ccClippingBoxTool.h"
 
 //Local
-#include "ccGLWindow.h"
-#include "mainwindow.h"
-#include "ccClippingBoxRepeatDlg.h"
 #include "ccBoundingBoxEditorDlg.h"
+#include "ccClippingBoxRepeatDlg.h"
 #include "ccContourExtractor.h"
 #include "ccCropTool.h"
+#include "ccGLWindow.h"
+#include "mainwindow.h"
 
 //qCC_db
-#include <ccLog.h>
-#include <ccHObject.h>
 #include <ccClipBox.h>
-#include <ccGenericPointCloud.h>
-#include <ccGenericMesh.h>
 #include <ccPointCloud.h>
 #include <ccProgressDialog.h>
-#include <ccPolyline.h>
-#include <ccProgressDialog.h>
-
-//CCLib
-#include <ReferenceCloud.h>
-#include <Neighbourhood.h>
 
 //Qt
 #include <QMessageBox>
-#include <QInputDialog>
-#include <QElapsedTimer>
 
 //Last contour unique ID
 static std::vector<unsigned> s_lastContourUniqueIDs;
@@ -379,26 +367,23 @@ ccHObject* GetSlice(ccHObject* obj, ccClipBox* clipBox, bool silent)
 	{
 		ccGenericPointCloud* inputCloud = ccHObjectCaster::ToGenericPointCloud(obj);
 
-		ccGenericPointCloud::VisibilityTableType* selectionTable = new ccGenericPointCloud::VisibilityTableType;
-		if (!selectionTable->resize(inputCloud->size()))
+		ccGenericPointCloud::VisibilityTableType selectionTable;
+		try
 		{
-			selectionTable->release();
-			selectionTable = 0;
-			
+			selectionTable.resize(inputCloud->size());
+		}
+		catch (const std::bad_alloc&)
+		{
 			if (!silent)
 			{
 				ccLog::Error("Not enough memory!");
 			}
 			return 0;
 		}
-		clipBox->flagPointsInside(inputCloud, selectionTable);
+		clipBox->flagPointsInside(inputCloud, &selectionTable);
 		
-		ccGenericPointCloud* sliceCloud = inputCloud->createNewCloudFromVisibilitySelection(false, selectionTable);
+		ccGenericPointCloud* sliceCloud = inputCloud->createNewCloudFromVisibilitySelection(false, &selectionTable);
 		
-		//we don't need the table anymore
-		selectionTable->release();
-		selectionTable = 0;
-
 		if (!sliceCloud && !silent)
 		{
 			ccLog::Error("Not enough memory!");
@@ -613,7 +598,7 @@ bool ccClippingBoxTool::ExtractSlicesAndContours
 
 				if (progressDialog)
 				{
-					progressDialog->setWindowTitle(QObject::tr("Preparing extraction"));
+					progressDialog->setWindowTitle(tr("Preparing extraction"));
 					progressDialog->start();
 					progressDialog->show();
 					progressDialog->setAutoClose(false);
@@ -627,8 +612,8 @@ bool ccClippingBoxTool::ExtractSlicesAndContours
 					ccGenericPointCloud* cloud = clouds[ci];
 					unsigned pointCount = cloud->size();
 
-					QString infos = QObject::tr("Cloud '%1").arg(cloud->getName());
-					infos += QObject::tr("Points: %1").arg(pointCount);
+					QString infos = tr("Cloud '%1").arg(cloud->getName());
+					infos += tr("Points: %L1").arg( pointCount );
 					if (progressDialog)
 					{
 						progressDialog->setInfo(infos);
@@ -684,7 +669,7 @@ bool ccClippingBoxTool::ExtractSlicesAndContours
 				if (progressDialog)
 				{
 					progressDialog->setWindowTitle(QObject::tr("Section extraction"));
-					progressDialog->setInfo(QObject::tr("Section(s): %1").arg(subCloudsCount));
+					progressDialog->setInfo(QObject::tr("Section(s): %L1").arg(subCloudsCount));
 					progressDialog->setMaximum(static_cast<int>(subCloudsCount));
 					progressDialog->setValue(0);
 					QApplication::processEvents();
@@ -833,7 +818,7 @@ bool ccClippingBoxTool::ExtractSlicesAndContours
 								{
 									if (generateRandomColors)
 									{
-										ccPointCloud* croppedVertices = ccHObjectCaster::ToPointCloud(croppedVertices);
+										ccPointCloud* croppedVertices = ccHObjectCaster::ToPointCloud(mesh->getAssociatedCloud());
 										if (croppedVertices)
 										{
 											ccColor::Rgb col = ccColor::Generator::Random();
@@ -846,6 +831,7 @@ bool ccClippingBoxTool::ExtractSlicesAndContours
 												k = indexMaxs[2];
 											}
 											croppedVertices->showColors(true);
+											mesh->showColors(true);
 										}
 									}
 
@@ -888,7 +874,7 @@ bool ccClippingBoxTool::ExtractSlicesAndContours
 			if (progressDialog)
 			{
 				progressDialog->setWindowTitle("Contour extraction");
-				progressDialog->setInfo(QObject::tr("Contour(s): %1").arg(cloudSliceCount));
+				progressDialog->setInfo(QObject::tr("Contour(s): %L1").arg(cloudSliceCount));
 				progressDialog->setMaximum(static_cast<int>(cloudSliceCount));
 				if (!visualDebugMode)
 				{

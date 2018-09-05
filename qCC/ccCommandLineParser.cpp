@@ -3,6 +3,8 @@
 //Local
 #include "ccCommandLineCommands.h"
 #include "ccCommandCrossSection.h"
+#include "ccCommandRaster.h"
+#include "ccPluginInterface.h"
 
 //qCC_db
 #include <ccProgressDialog.h>
@@ -58,7 +60,7 @@ bool ccCommandLineParser::error(const QString& message) const
 	return false;
 }
 
-int ccCommandLineParser::Parse(int nargs, char** args, tPluginInfoList* plugins/*=0*/)
+int ccCommandLineParser::Parse(int nargs, char** args, ccPluginInterfaceList& plugins)
 {
 	if (!args || nargs < 2)
 	{
@@ -96,18 +98,15 @@ int ccCommandLineParser::Parse(int nargs, char** args, tPluginInfoList* plugins/
 	}
 
 	//load the plugins commands
-	if (plugins)
+	for ( ccPluginInterface *plugin : plugins )
 	{
-		for (tPluginInfo pluginInfo : *plugins)
+		if (!plugin)
 		{
-			if (!pluginInfo.object)
-			{
-				assert(false);
-				continue;
-			}
-			ccPluginInterface* plugin = static_cast<ccPluginInterface*>(pluginInfo.object);
-			plugin->registerCommands(parser.data());
+			assert(false);
+			continue;
 		}
+
+		plugin->registerCommands(parser.data());
 	}
 
 	//parse input
@@ -151,8 +150,10 @@ ccCommandLineParser::ccCommandLineParser()
 	registerCommand(Command::Shared(new CommandDropGlobalShift));
 	registerCommand(Command::Shared(new CommandFilterBySFValue));
 	registerCommand(Command::Shared(new CommandMergeClouds));
+	registerCommand(Command::Shared(new CommandMergeMeshes));
 	registerCommand(Command::Shared(new CommandSetActiveSF));
 	registerCommand(Command::Shared(new CommandRemoveAllSF));
+	registerCommand(Command::Shared(new CommandRemoveScanGrids));
 	registerCommand(Command::Shared(new CommandMatchBBCenters));
 	registerCommand(Command::Shared(new CommandMatchBestFitPlane));
 	registerCommand(Command::Shared(new CommandOrientNormalsMST));
@@ -161,8 +162,8 @@ ccCommandLineParser::ccCommandLineParser()
 	registerCommand(Command::Shared(new CommandCrossSection));
 	registerCommand(Command::Shared(new CommandCrop));
 	registerCommand(Command::Shared(new CommandCrop2D));
+	registerCommand(Command::Shared(new CommandCoordToSF));
 	registerCommand(Command::Shared(new CommandColorBanding));
-	registerCommand(Command::Shared(new CommandBundler));
 	registerCommand(Command::Shared(new CommandC2MDist));
 	registerCommand(Command::Shared(new CommandC2CDist));
 	registerCommand(Command::Shared(new CommandStatTest));
@@ -185,11 +186,13 @@ ccCommandLineParser::ccCommandLineParser()
 	registerCommand(Command::Shared(new CommandClearMeshes));
 	registerCommand(Command::Shared(new CommandPopMeshes));
 	registerCommand(Command::Shared(new CommandSetNoTimestamp));
-	//registerCommand(Command::Shared(new XXX));
-	//registerCommand(Command::Shared(new XXX));
-	//registerCommand(Command::Shared(new XXX));
-	//registerCommand(Command::Shared(new XXX));
-	//registerCommand(Command::Shared(new XXX));
+	registerCommand(Command::Shared(new CommandVolume25D));
+	registerCommand(Command::Shared(new CommandRasterize));
+	registerCommand(Command::Shared(new CommandOctreeNormal));
+	registerCommand(Command::Shared(new CommandClearNormals));
+	registerCommand(Command::Shared(new CommandComputeMeshVolume));
+	registerCommand(Command::Shared(new CommandSFColorScale));
+	registerCommand(Command::Shared(new CommandSFConvertToRGB));
 }
 
 ccCommandLineParser::~ccCommandLineParser()
@@ -215,7 +218,7 @@ bool ccCommandLineParser::registerCommand(Command::Shared command)
 	if (m_commands.contains(command->m_keyword))
 	{
 		assert(false);
-		warning(QString("Internal error: keyword '%' already registered (by command '%2')").arg(command->m_keyword).arg(m_commands[command->m_keyword]->m_name));
+		warning(QString("Internal error: keyword '%' already registered (by command '%2')").arg(command->m_keyword, m_commands[command->m_keyword]->m_name));
 		return false;
 	}
 
@@ -224,9 +227,64 @@ bool ccCommandLineParser::registerCommand(Command::Shared command)
 	return true;
 }
 
+QString ccCommandLineParser::getExportFilename(	const CLEntityDesc& entityDesc,
+												QString extension/*=QString()*/,
+												QString suffix/*=QString()*/,
+												QString* baseOutputFilename/*=0*/,
+												bool forceNoTimestamp/*=false*/) const
+{
+	//fetch the real entity
+	const ccHObject* entity = entityDesc.getEntity();
+	if (!entity)
+	{
+		assert(false);
+		warning("[ExportEntity] Internal error: invalid input entity!");
+		return QString();
+	}
+
+	//sub-item?
+	if (entityDesc.indexInFile >= 0)
+	{
+		if (suffix.isEmpty())
+			suffix = QString("%1").arg(entityDesc.indexInFile);
+		else
+			suffix.prepend(QString("%1_").arg(entityDesc.indexInFile));
+	}
+
+	QString baseName = entityDesc.basename;
+	if (!suffix.isEmpty())
+	{
+		baseName += QString("_") + suffix;
+	}
+
+	QString outputFilename = baseName;
+	if (m_addTimestamp && !forceNoTimestamp)
+	{
+		outputFilename += QString("_%1").arg(QDateTime::currentDateTime().toString("yyyy-MM-dd_hh'h'mm_ss_zzz"));
+	}
+
+	if (!extension.isEmpty())
+	{
+		outputFilename += QString(".%1").arg(extension);
+	}
+
+	if (baseOutputFilename)
+	{
+		*baseOutputFilename = outputFilename;
+	}
+
+	if (!entityDesc.path.isEmpty())
+	{
+		outputFilename.prepend(QString("%1/").arg(entityDesc.path));
+	}
+
+	return outputFilename;
+
+}
+
 QString ccCommandLineParser::exportEntity(	CLEntityDesc& entityDesc,
 											QString suffix/*=QString()*/,
-											QString* _outputFilename/*=0*/,
+											QString* baseOutputFilename/*=0*/,
 											bool forceIsCloud/*=false*/,
 											bool forceNoTimestamp/*=false*/)
 {
@@ -240,44 +298,32 @@ QString ccCommandLineParser::exportEntity(	CLEntityDesc& entityDesc,
 		return "[ExportEntity] Internal error: invalid input entity!";
 	}
 
-	//get its name
-	QString entName = entity->getName();
-	if (entName.isEmpty())
-		entName = entityDesc.basename;
-
-	//sub-item?
-	if (entityDesc.indexInFile >= 0)
-	{
-		if (suffix.isEmpty())
-			suffix = QString("%1").arg(entityDesc.indexInFile);
-		else
-			suffix.prepend(QString("%1_").arg(entityDesc.indexInFile));
-	}
-
 	//specific case: clouds
 	bool isCloud = entity->isA(CC_TYPES::POINT_CLOUD);
 	isCloud |= forceIsCloud;
-
-	if (!suffix.isEmpty())
-		entName += QString("_") + suffix;
-	entity->setName(entName);
-
-	QString baseName = entityDesc.basename;
-	if (!suffix.isEmpty())
-		baseName += QString("_") + suffix;
-
-	QString outputFilename = baseName;
-	if (m_addTimestamp && !forceNoTimestamp)
-		outputFilename += QString("_%1").arg(QDateTime::currentDateTime().toString("yyyy-MM-dd_hh'h'mm_ss"));
 	QString extension = isCloud ? m_cloudExportExt : m_meshExportExt;
-	if (!extension.isEmpty())
-		outputFilename += QString(".%1").arg(extension);
 
-	if (_outputFilename)
-		*_outputFilename = outputFilename;
+	QString outputFilename = getExportFilename(entityDesc, extension, suffix, baseOutputFilename, forceNoTimestamp);
+	if (outputFilename.isEmpty())
+	{
+		return QString();
+	}
 
-	if (!entityDesc.path.isEmpty())
-		outputFilename.prepend(QString("%1/").arg(entityDesc.path));
+	//update the entity name as well
+	{
+		QString entName = entity->getName();
+		if (entName.isEmpty())
+		{
+			entName = entityDesc.basename;
+		}
+
+		if (!suffix.isEmpty())
+		{
+			entName += QString("_") + suffix;
+		}
+
+		entity->setName(entName);
+	}
 
 	bool tempDependencyCreated = false;
 	ccGenericMesh* mesh = 0;
@@ -306,8 +352,11 @@ QString ccCommandLineParser::exportEntity(	CLEntityDesc& entityDesc,
 		}
 	}
 
+#ifdef _DEBUG
+	print("Output filename: " + outputFilename);
+#endif
 	CC_FILE_ERROR result = FileIOFilter::SaveToFile(entity,
-													qPrintable(outputFilename),
+													outputFilename,
 													parameters,
 													isCloud ? m_cloudExportFormat : m_meshExportFormat);
 
@@ -394,7 +443,7 @@ bool ccCommandLineParser::importFile(QString filename, FileIOFilter::Shared filt
 				{
 					verticesIDs.insert(vertices->getUniqueID());
 					print(QString("Found one mesh with %1 faces and %2 vertices: '%3'").arg(mesh->size()).arg(mesh->getAssociatedCloud()->size()).arg(mesh->getName()));
-					m_meshes.push_back(CLMeshDesc(mesh, filename, count == 1 ? -1 : static_cast<int>(i)));
+					m_meshes.emplace_back(mesh, filename, count == 1 ? -1 : static_cast<int>(i));
 				}
 				else
 				{
@@ -422,7 +471,7 @@ bool ccCommandLineParser::importFile(QString filename, FileIOFilter::Shared filt
 				{
 					verticesIDs.insert(vertices->getUniqueID());
 					print(QString("Found one kind of mesh with %1 faces and %2 vertices: '%3'").arg(mesh->size()).arg(mesh->getAssociatedCloud()->size()).arg(mesh->getName()));
-					m_meshes.push_back(CLMeshDesc(mesh, filename, count == 1 ? -1 : static_cast<int>(countBefore + i)));
+					m_meshes.emplace_back(mesh, filename, count == 1 ? -1 : static_cast<int>(countBefore + i));
 				}
 				else
 				{
@@ -454,7 +503,7 @@ bool ccCommandLineParser::importFile(QString filename, FileIOFilter::Shared filt
 				continue;
 			}
 			print(QString("Found one cloud with %1 points").arg(pc->size()));
-			m_clouds.push_back(CLCloudDesc(pc, filename, count == 1 ? -1 : static_cast<int>(i)));
+			m_clouds.emplace_back(pc, filename, count == 1 ? -1 : static_cast<int>(i));
 		}
 	}
 
@@ -464,7 +513,7 @@ bool ccCommandLineParser::importFile(QString filename, FileIOFilter::Shared filt
 	return true;
 }
 
-bool ccCommandLineParser::saveClouds(QString suffix/*=QString()*/, bool allAtOnce/*=false*/)
+bool ccCommandLineParser::saveClouds(QString suffix/*=QString()*/, bool allAtOnce/*=false*/, const QString* allAtOnceFileName/*=0*/)
 {
 	//all-at-once: all clouds in a single file
 	if (allAtOnce)
@@ -481,14 +530,19 @@ bool ccCommandLineParser::saveClouds(QString suffix/*=QString()*/, bool allAtOnc
 		{
 			ccHObject tempContainer("Clouds");
 			{
-				for (size_t i = 0; i < m_clouds.size(); ++i)
+				for (CLCloudDesc& desc : m_clouds)
 				{
-					tempContainer.addChild(m_clouds[i].getEntity(), ccHObject::DP_NONE);
+					tempContainer.addChild(desc.getEntity(), ccHObject::DP_NONE);
 				}
 			}
 
 			//save output
 			CLGroupDesc desc(&tempContainer, "AllClouds", m_clouds.front().path);
+			if (allAtOnceFileName)
+			{
+				CommandSave::SetFileDesc(desc, *allAtOnceFileName);
+			}
+
 			QString errorStr = exportEntity(desc, suffix, 0, true);
 			if (!errorStr.isEmpty())
 				return error(errorStr);
@@ -504,10 +558,10 @@ bool ccCommandLineParser::saveClouds(QString suffix/*=QString()*/, bool allAtOnc
 
 	//standard way: one file per cloud
 	{
-		for (size_t i = 0; i < m_clouds.size(); ++i)
+		for (CLCloudDesc& desc : m_clouds)
 		{
 			//save output
-			QString errorStr = exportEntity(m_clouds[i], suffix);
+			QString errorStr = exportEntity(desc, suffix);
 			if (!errorStr.isEmpty())
 				return error(errorStr);
 		}
@@ -516,7 +570,7 @@ bool ccCommandLineParser::saveClouds(QString suffix/*=QString()*/, bool allAtOnc
 	return true;
 }
 
-bool ccCommandLineParser::saveMeshes(QString suffix/*=QString()*/, bool allAtOnce/*=false*/)
+bool ccCommandLineParser::saveMeshes(QString suffix/*=QString()*/, bool allAtOnce/*=false*/, const QString* allAtOnceFileName/*=0*/)
 {
 	//all-at-once: all meshes in a single file
 	if (allAtOnce)
@@ -536,8 +590,14 @@ bool ccCommandLineParser::saveMeshes(QString suffix/*=QString()*/, bool allAtOnc
 				for (size_t i = 0; i < m_meshes.size(); ++i)
 					tempContainer.addChild(m_meshes[i].getEntity(), ccHObject::DP_NONE);
 			}
+
 			//save output
 			CLGroupDesc desc(&tempContainer, "AllMeshes", m_meshes.front().path);
+			if (allAtOnceFileName)
+			{
+				CommandSave::SetFileDesc(desc, *allAtOnceFileName);
+			}
+
 			QString errorStr = exportEntity(desc, suffix, 0, false);
 			if (!errorStr.isEmpty())
 				return error(errorStr);
@@ -613,7 +673,7 @@ int ccCommandLineParser::start(QDialog* parent/*=0*/)
 			print("Available commands:");
 			for (auto it = m_commands.constBegin(); it != m_commands.constEnd(); ++it)
 			{
-				print(QString("-%1: %2").arg(it.key().toUpper()).arg(it.value()->m_name));
+				print(QString("-%1: %2").arg(it.key().toUpper(), it.value()->m_name));
 			}
 		}
 		else

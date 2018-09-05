@@ -31,8 +31,8 @@
 //system
 #include <assert.h>
 
-ccOverlayDialog::ccOverlayDialog(QWidget* parent/*=0*/)
-	: QDialog(parent, Qt::FramelessWindowHint | Qt::Tool)
+ccOverlayDialog::ccOverlayDialog(QWidget* parent/*=0*/, Qt::WindowFlags flags/*=Qt::FramelessWindowHint | Qt::Tool*/)
+	: QDialog(parent, flags)
 	, m_associatedWin(0)
 	, m_processing(false)
 {
@@ -56,30 +56,30 @@ bool ccOverlayDialog::linkWith(ccGLWindow* win)
 	{
 		return true;
 	}
-		
+
 	if (m_associatedWin)
 	{
 		//we automatically detach the former dialog
 		{
 			QWidgetList topWidgets = QApplication::topLevelWidgets();
-			foreach(QWidget* widget,topWidgets)
+			foreach(QWidget* widget, topWidgets)
 			{
 				widget->removeEventFilter(this);
 			}
 		}
 		m_associatedWin->disconnect(this);
-		m_associatedWin = 0;
+		m_associatedWin = nullptr;
 	}
 
 	m_associatedWin = win;
 	if (m_associatedWin)
 	{
 		QWidgetList topWidgets = QApplication::topLevelWidgets();
-		foreach(QWidget* widget,topWidgets)
+		foreach(QWidget* widget, topWidgets)
 		{
 			widget->installEventFilter(this);
 		}
-		connect(m_associatedWin, SIGNAL(destroyed(QObject*)), this, SLOT(onLinkedWindowDeletion(QObject*)));
+		connect(m_associatedWin, &QObject::destroyed, this, &ccOverlayDialog::onLinkedWindowDeletion);
 	}
 
 	return true;
@@ -148,6 +148,11 @@ bool ccOverlayDialog::eventFilter(QObject *obj, QEvent *e)
 	}
 	else
 	{
+		if (e->type() == QEvent::Show)
+		{
+			emit shown();
+		}
+		
 		// standard event processing
 		return QObject::eventFilter(obj, e);
 	}

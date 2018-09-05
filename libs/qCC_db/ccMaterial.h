@@ -19,14 +19,14 @@
 #define CC_MATERIAL_HEADER
 
 //Local
-#include "ccSerializableObject.h"
 #include "ccColorTypes.h"
+#include "ccSerializableObject.h"
 
 //Qt
-#include <QImage>
-#include <QStringList>
+#include <QtGui/qopengl.h>
 #include <QSharedPointer>
 
+class QImage;
 class QOpenGLContext;
 
 //! Mesh (triangle) material
@@ -162,12 +162,6 @@ protected:
 	ccColor::Rgbaf m_emission;
 	float m_shininessFront;
 	float m_shininessBack;
-
-	//float m_reflect;
-	//float m_refract;
-	//float m_trans;
-	//float m_glossy;
-	//float m_refract_index;
 };
 
 #endif //CC_MATERIAL_HEADER

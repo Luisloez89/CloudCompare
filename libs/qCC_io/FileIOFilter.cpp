@@ -20,13 +20,8 @@
 //file wrappers
 //CLOUDS
 #include "BinFilter.h"
-#include "IcmFilter.h"
+#include "SimpleBinFilter.h"
 #include "AsciiFilter.h"
-#include "SoiFilter.h"
-#include "PNFilter.h"
-#include "PVFilter.h"
-#include "PovFilter.h"
-#include "BundlerFilter.h"
 #include "VTKFilter.h"
 #include "STLFilter.h"
 #include "LASFilter.h"
@@ -47,8 +42,6 @@
 #include "DxfFilter.h"
 #include "ShpFilter.h"
 #include "MascaretFilter.h"
-#include "SinusxFilter.h"
-#include "SalomeHydroFilter.h"
 #include "HeightProfileFilter.h"
 
 //Qt
@@ -60,14 +53,26 @@
 #endif
 
 //system
-#include <assert.h>
+#include <cassert>
 #include <vector>
 
 //! Available filters
 /** Filters are uniquely recognized by their 'file filter' string.
 	We use a std::vector so as to keep the insertion ordering!
 **/
-FileIOFilter::FilterContainer s_ioFilters;
+static FileIOFilter::FilterContainer s_ioFilters;
+
+static unsigned s_sessionCounter = 0;
+
+void FileIOFilter::ResetSesionCounter()
+{
+	s_sessionCounter = 0;
+}
+
+unsigned FileIOFilter::IncreaseSesionCounter()
+{
+	return ++s_sessionCounter;
+}
 
 void FileIOFilter::InitInternalFilters()
 {
@@ -81,6 +86,7 @@ void FileIOFilter::InitInternalFilters()
 	Register(Shared(new E57Filter()));
 #endif
 	Register(Shared(new PTXFilter()));
+	Register(Shared(new SimpleBinFilter()));
 	Register(Shared(new PlyFilter()));
 	Register(Shared(new ObjFilter()));
 	Register(Shared(new VTKFilter()));
@@ -101,19 +107,10 @@ void FileIOFilter::InitInternalFilters()
 #ifdef CC_GDAL_SUPPORT
 	Register(Shared(new RasterGridFilter()));
 #endif
-	Register(Shared(new BundlerFilter()));
 	Register(Shared(new ImageFileFilter()));
-	//secondary formats (are they even used anymore?!)
-	Register(Shared(new PNFilter()));
-	Register(Shared(new PVFilter()));
-	Register(Shared(new SoiFilter()));
 	Register(Shared(new MAFilter()));
-	Register(Shared(new PovFilter()));
-	Register(Shared(new IcmFilter()));
 	Register(Shared(new DepthMapFileFilter()));
 	Register(Shared(new MascaretFilter()));
-	Register(Shared(new SinusxFilter()));
-	Register(Shared(new SalomeHydroFilter()));
 	Register(Shared(new HeightProfileFilter()));
 }
 
@@ -145,7 +142,7 @@ void FileIOFilter::Register(Shared filter)
 				if (otherFilters.contains(fileFilters[i]))
 				{
 					const QString otherFilterName = (*it)->getDefaultExtension().toUpper();;
-					ccLog::Warning(QStringLiteral("[FileIOFilter::Register] Internal error: file filter '%1' of filter '%2' is already handled by another filter ('%3')!").arg(fileFilters[i]).arg(filterName).arg(otherFilterName));
+					ccLog::Warning(QStringLiteral("[FileIOFilter::Register] Internal error: file filter '%1' of filter '%2' is already handled by another filter ('%3')!").arg(fileFilters[i],filterName,otherFilterName));
 					error = true;
 					break;
 				}
@@ -169,7 +166,7 @@ void FileIOFilter::UnregisterAll()
 	s_ioFilters.clear();
 }
 
-FileIOFilter::Shared FileIOFilter::GetFilter(QString fileFilter, bool onImport)
+FileIOFilter::Shared FileIOFilter::GetFilter(const QString& fileFilter, bool onImport)
 {
 	if (!fileFilter.isEmpty())
 	{
@@ -181,7 +178,7 @@ FileIOFilter::Shared FileIOFilter::GetFilter(QString fileFilter, bool onImport)
 		}
 	}
 
-	return Shared(0);
+	return Shared(nullptr);
 }
 
 const FileIOFilter::FilterContainer& FileIOFilter::GetFilters()
@@ -189,17 +186,17 @@ const FileIOFilter::FilterContainer& FileIOFilter::GetFilters()
 	return s_ioFilters;
 }
 
-FileIOFilter::Shared FileIOFilter::FindBestFilterForExtension(QString ext)
+FileIOFilter::Shared FileIOFilter::FindBestFilterForExtension(const QString& ext)
 {
-	ext = ext.toUpper();
+	const QString upperExt = ext.toUpper();
 
 	for (FilterContainer::const_iterator it=s_ioFilters.begin(); it!=s_ioFilters.end(); ++it)
 	{
-		if ((*it)->canLoadExtension(ext))
+		if ((*it)->canLoadExtension(upperExt))
 			return *it;
 	}
 
-	return Shared(0);
+	return Shared(nullptr);
 }
 
 ccHObject* FileIOFilter::LoadFromFile(	const QString& filename,
@@ -212,7 +209,7 @@ ccHObject* FileIOFilter::LoadFromFile(	const QString& filename,
 		ccLog::Error(QString("[Load] Internal error (invalid input filter)").arg(filename));
 		result = CC_FERR_CONSOLE_ERROR;
 		assert(false);
-		return 0;
+		return nullptr;
 	}
 
 	//check file existence
@@ -221,23 +218,40 @@ ccHObject* FileIOFilter::LoadFromFile(	const QString& filename,
 	{
 		ccLog::Error(QString("[Load] File '%1' doesn't exist!").arg(filename));
 		result = CC_FERR_CONSOLE_ERROR; 
-		return 0;
+		return nullptr;
 	}
 
 	//load file
 	ccHObject* container = new ccHObject();
 	result = CC_FERR_NO_ERROR;
+	
+	//we start a new 'action' inside the current sessions
+	unsigned sessionCounter = IncreaseSesionCounter();
+	loadParameters.sessionStart = (sessionCounter == 1);
+
 	try
 	{
 		result = filter->loadFile(	filename,
 									*container,
 									loadParameters);
 	}
-	catch(...)
+	catch (const std::exception& e)
+	{
+		ccLog::Warning(QString("[I/O] CC has caught an exception while loading file '%1'").arg(filename));
+		ccLog::Warning(QString("[I/O] Exception: %1").arg(e.what()));
+		if (container)
+		{
+			container->removeAllChildren();
+		}
+		result = CC_FERR_CONSOLE_ERROR;
+	}
+	catch (...)
 	{
 		ccLog::Warning(QString("[I/O] CC has caught an unhandled exception while loading file '%1'").arg(filename));
 		if (container)
+		{
 			container->removeAllChildren();
+		}
 		result = CC_FERR_CONSOLE_ERROR;
 	}
 
@@ -254,7 +268,7 @@ ccHObject* FileIOFilter::LoadFromFile(	const QString& filename,
 	if (childCount != 0)
 	{
 		//we set the main container name as the full filename (with path)
-		container->setName(QString("%1 (%2)").arg(fi.fileName()).arg(fi.absolutePath()));
+		container->setName(QString("%1 (%2)").arg(fi.fileName(),fi.absolutePath()));
 		for (unsigned i = 0; i < childCount; ++i)
 		{
 			ccHObject* child = container->getChild(i);
@@ -270,7 +284,7 @@ ccHObject* FileIOFilter::LoadFromFile(	const QString& filename,
 	else
 	{
 		delete container;
-		container = 0;
+		container = nullptr;
 	}
 
 	return container;
@@ -281,7 +295,7 @@ ccHObject* FileIOFilter::LoadFromFile(	const QString& filename,
 										CC_FILE_ERROR& result,
 										QString fileFilter/*=QString()*/)
 {
-	Shared filter(0);
+	Shared filter(nullptr);
 	
 	//if the right filter is specified by the caller
 	if (!fileFilter.isEmpty())
@@ -291,7 +305,7 @@ ccHObject* FileIOFilter::LoadFromFile(	const QString& filename,
 		{
 			ccLog::Error(QString("[Load] Internal error: no I/O filter corresponds to filter '%1'").arg(fileFilter));
 			result = CC_FERR_CONSOLE_ERROR;
-			return 0;
+			return nullptr;
 		}
 	}
 	else //we need to guess the I/O filter based on the file format
@@ -302,7 +316,7 @@ ccHObject* FileIOFilter::LoadFromFile(	const QString& filename,
 		{
 			ccLog::Error("[Load] Can't guess file format: no file extension");
 			result = CC_FERR_CONSOLE_ERROR;
-			return 0;
+			return nullptr;
 		}
 
 		//convert extension to file format
@@ -313,7 +327,7 @@ ccHObject* FileIOFilter::LoadFromFile(	const QString& filename,
 		{
 			ccLog::Error(QString("[Load] Can't guess file format: unhandled file extension '%1'").arg(extension));
 			result = CC_FERR_CONSOLE_ERROR;
-			return 0;
+			return nullptr;
 		}
 	}
 
@@ -322,7 +336,7 @@ ccHObject* FileIOFilter::LoadFromFile(	const QString& filename,
 
 CC_FILE_ERROR FileIOFilter::SaveToFile(	ccHObject* entities,
 										const QString& filename,
-										SaveParameters& parameters,
+										const SaveParameters& parameters,
 										Shared filter)
 {
 	if (!entities || filename.isEmpty() || !filter)
@@ -358,8 +372,8 @@ CC_FILE_ERROR FileIOFilter::SaveToFile(	ccHObject* entities,
 
 CC_FILE_ERROR FileIOFilter::SaveToFile(	ccHObject* entities,
 										const QString& filename,
-										SaveParameters& parameters,
-										QString fileFilter)
+										const SaveParameters& parameters,
+										const QString& fileFilter)
 {
 	if (fileFilter.isEmpty())
 		return CC_FERR_BAD_ARGUMENT;
@@ -439,24 +453,29 @@ void FileIOFilter::DisplayErrorMessage(CC_FILE_ERROR err, const QString& action,
 		return; //no message will be displayed!
 	}
 
-	QString outputString = QString("An error occurred while %1 '%2': ").arg(action).arg(filename) + errorStr;
+	QString outputString = QString("An error occurred while %1 '%2': ").arg(action,filename) + errorStr;
 	if (warning)
 		ccLog::Warning(outputString);
 	else
 		ccLog::Error(outputString);
 }
 
-bool FileIOFilter::CheckForSpecialChars(QString filename)
+bool FileIOFilter::CheckForSpecialChars(const QString& filename)
 {
 	return (filename.normalized(QString::NormalizationForm_D) != filename);
 }
 
-bool FileIOFilter::HandleGlobalShift(const CCVector3d& P, CCVector3d& Pshift, LoadParameters& loadParameters, bool useInputCoordinatesShiftIfPossible/*=false*/)
+bool FileIOFilter::HandleGlobalShift(	const CCVector3d& P,
+										CCVector3d& Pshift,
+										bool& preserveCoordinateShift,
+										LoadParameters& loadParameters,
+										bool useInputCoordinatesShiftIfPossible/*=false*/)
 {
 	bool shiftAlreadyEnabled = (loadParameters.coordinatesShiftEnabled && *loadParameters.coordinatesShiftEnabled && loadParameters.coordinatesShift);
 	if (shiftAlreadyEnabled)
 	{
 		Pshift = *loadParameters.coordinatesShift;
+		preserveCoordinateShift = loadParameters.preserveShiftOnSave;
 	}
 	
 	bool applyAll = false;
@@ -466,7 +485,8 @@ bool FileIOFilter::HandleGlobalShift(const CCVector3d& P, CCVector3d& Pshift, Lo
 											loadParameters.shiftHandlingMode,
 											shiftAlreadyEnabled || useInputCoordinatesShiftIfPossible,
 											Pshift,
-											0,
+											&preserveCoordinateShift,
+											nullptr,
 											&applyAll) )
 	{
 		//we save coordinates shift information
@@ -474,6 +494,7 @@ bool FileIOFilter::HandleGlobalShift(const CCVector3d& P, CCVector3d& Pshift, Lo
 		{
 			*loadParameters.coordinatesShiftEnabled = true;
 			*loadParameters.coordinatesShift = Pshift;
+			loadParameters.preserveShiftOnSave = preserveCoordinateShift;
 		}
 
 		return true;

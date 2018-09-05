@@ -95,10 +95,10 @@ public:
 		Warning: be sure to activate an OUTPUT scalar field on the input cloud
 		\param Yk a group of points
 		\param numberOfClasses the number of classes for the Chi2 Test
-		\param histo an array to store the values projection result (optionnal)
+		\param histo an array to store the values projection result (optional)
 		\return the Chi2 distance (or -1.0 if an error occurred)
 	**/
-	virtual double computeChi2Dist(const GenericCloud* Yk, unsigned numberOfClasses, int* histo=0) = 0;
+	virtual double computeChi2Dist(const GenericCloud* Yk, unsigned numberOfClasses, int* histo = nullptr) = 0;
 
 protected:
 

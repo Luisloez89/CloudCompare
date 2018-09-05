@@ -27,17 +27,16 @@
 #include <ccGriddedTools.h>
 
 //Qt
-#include <QFile>
 #include <QTextStream>
 #include <QMessageBox>
 
 //System
-#include <assert.h>
-#include <string.h>
+#include <cassert>
+#include <string>
 
 const char CC_PTX_INTENSITY_FIELD_NAME[] = "Intensity";
 
-bool PTXFilter::canLoadExtension(QString upperCaseExt) const
+bool PTXFilter::canLoadExtension(const QString& upperCaseExt) const
 {
 	return (upperCaseExt == "PTX");
 }
@@ -71,7 +70,7 @@ void CleanMatrix(ccGLMatrixd& mat)
 		X.normalize();
 		Y.normalize();
 		Z.normalize();
-		mat = ccGLMatrixd(X,Y,Z,T);
+		mat = ccGLMatrixd(X, Y, Z, T);
 //#ifdef QT_DEBUG
 //		double dot = CCVector3d(X).dot(X0);
 //		dot /= (normX0 * CCVector3d(X).norm());
@@ -88,7 +87,7 @@ void CleanMatrix(ccGLMatrixd& mat)
 	}
 }
 
-CC_FILE_ERROR PTXFilter::loadFile(	QString filename,
+CC_FILE_ERROR PTXFilter::loadFile(	const QString& filename,
 									ccHObject& container,
 									LoadParameters& parameters)
 {
@@ -101,26 +100,30 @@ CC_FILE_ERROR PTXFilter::loadFile(	QString filename,
 
 	QTextStream inFile(&file);
 
-	CCVector3d PshiftTrans(0,0,0);
-	CCVector3d PshiftCloud(0,0,0);
+	CCVector3d PshiftTrans(0, 0, 0);
+	CCVector3d PshiftCloud(0, 0, 0);
+	bool preserveCoordinateShift = true;
 
 	CC_FILE_ERROR result = CC_FERR_NO_LOAD;
 	ScalarType minIntensity = 0;
 	ScalarType maxIntensity = 0;
 
 	//progress dialog
-	ccProgressDialog pdlg(true, parameters.parentWidget);
+	QScopedPointer<ccProgressDialog> pDlg(nullptr);
 	if (parameters.parentWidget)
 	{
-		pdlg.setMethodTitle(QObject::tr("Loading PTX file"));
-		pdlg.setAutoClose(false);
+		pDlg.reset(new ccProgressDialog(true, parameters.parentWidget));
+		pDlg->setMethodTitle(QObject::tr("Loading PTX file"));
+		pDlg->setAutoClose(false);
 	}
 
 	//progress dialog (for normals computation)
-	ccProgressDialog normalsProgressDlg(true, parameters.parentWidget);
-	if (parameters.parentWidget)
+	QScopedPointer<ccProgressDialog> normalsProgressDlg(nullptr);
+	if (parameters.parentWidget && parameters.autoComputeNormals)
 	{
-		normalsProgressDlg.setAutoClose(false);
+		normalsProgressDlg.reset(new ccProgressDialog(true, parameters.parentWidget));
+		normalsProgressDlg->setAutoClose(false);
+		normalsProgressDlg->hide();
 	}
 
 	for (unsigned cloudIndex = 0; result == CC_FERR_NO_ERROR || result == CC_FERR_NO_LOAD; cloudIndex++)
@@ -145,17 +148,17 @@ CC_FILE_ERROR PTXFilter::loadFile(	QString filename,
 			if (!ok)
 				return CC_FERR_MALFORMED_FILE;
 
-			ccLog::Print(QString("[PTX] Scan #%1 - grid size: %2 x %3").arg(cloudIndex+1).arg(height).arg(width));
+			ccLog::Print(QString("[PTX] Scan #%1 - grid size: %2 x %3").arg(cloudIndex + 1).arg(height).arg(width));
 
 			//read sensor transformation matrix
-			for (int i=0; i<4; ++i)
+			for (int i = 0; i < 4; ++i)
 			{
 				line = inFile.readLine();
-				QStringList tokens = line.split(" ",QString::SkipEmptyParts);
+				QStringList tokens = line.split(" ", QString::SkipEmptyParts);
 				if (tokens.size() != 3)
 					return CC_FERR_MALFORMED_FILE;
 
-				double* colDest = 0;
+				double* colDest = nullptr;
 				if (i == 0)
 				{
 					//Translation
@@ -164,10 +167,10 @@ CC_FILE_ERROR PTXFilter::loadFile(	QString filename,
 				else
 				{
 					//X, Y and Z axis
-					colDest = sensorTransD.getColumn(i-1);
+					colDest = sensorTransD.getColumn(i - 1);
 				}
 
-				for (int j=0; j<3; ++j)
+				for (int j = 0; j < 3; ++j)
 				{
 					assert(colDest);
 					colDest[j] = tokens[j].toDouble(&ok);
@@ -179,15 +182,15 @@ CC_FILE_ERROR PTXFilter::loadFile(	QString filename,
 			CleanMatrix(sensorTransD);
 
 			//read cloud transformation matrix
-			for (int i=0; i<4; ++i)
+			for (int i = 0; i < 4; ++i)
 			{
 				line = inFile.readLine();
-				QStringList tokens = line.split(" ",QString::SkipEmptyParts);
+				QStringList tokens = line.split(" ", QString::SkipEmptyParts);
 				if (tokens.size() != 4)
 					return CC_FERR_MALFORMED_FILE;
 
 				double* col = cloudTransD.getColumn(i);
-				for (int j=0; j<4; ++j)
+				for (int j = 0; j < 4; ++j)
 				{
 					col[j] = tokens[j].toDouble(&ok);
 					if (!ok)
@@ -200,9 +203,9 @@ CC_FILE_ERROR PTXFilter::loadFile(	QString filename,
 			//handle Global Shift directly on the first cloud's translation!
 			if (cloudIndex == 0)
 			{
-				if (HandleGlobalShift(cloudTransD.getTranslationAsVec3D(),PshiftTrans,parameters))
+				if (HandleGlobalShift(cloudTransD.getTranslationAsVec3D(), PshiftTrans, preserveCoordinateShift, parameters))
 				{
-					ccLog::Warning("[PTXFilter::loadFile] Cloud has be recentered! Translation: (%.2f ; %.2f ; %.2f)",PshiftTrans.x,PshiftTrans.y,PshiftTrans.z);
+					ccLog::Warning("[PTXFilter::loadFile] Cloud has be recentered! Translation: (%.2f ; %.2f ; %.2f)", PshiftTrans.x, PshiftTrans.y, PshiftTrans.z);
 				}
 			}
 
@@ -220,9 +223,10 @@ CC_FILE_ERROR PTXFilter::loadFile(	QString filename,
 		else
 		{
 			if (container.getChildrenNumber() == 1)
+			{
 				container.getChild(0)->setName("unnamed - Cloud 1"); //update previous cloud name!
-
-			cloud->setName(QString("unnamed - Cloud %1").arg(container.getChildrenNumber()+1));
+			}
+			cloud->setName(QString("unnamed - Cloud %1").arg(container.getChildrenNumber() + 1));
 		}
 
 		unsigned gridSize = width * height;
@@ -230,20 +234,23 @@ CC_FILE_ERROR PTXFilter::loadFile(	QString filename,
 		{
 			result = CC_FERR_NOT_ENOUGH_MEMORY;
 			delete cloud;
-			cloud = 0;
+			cloud = nullptr;
 			break;
 		}
 
 		//set global shift
-		cloud->setGlobalShift(PshiftTrans);
+		if (preserveCoordinateShift)
+		{
+			cloud->setGlobalShift(PshiftTrans);
+		}
 
 		//intensities
 		ccScalarField* intensitySF = new ccScalarField(CC_PTX_INTENSITY_FIELD_NAME);
-		if (!intensitySF->reserve(static_cast<unsigned>(gridSize)))
+		if (!intensitySF->reserveSafe(static_cast<unsigned>(gridSize)))
 		{
 			ccLog::Warning("[PTX] Not enough memory to load intensities!");
 			intensitySF->release();
-			intensitySF = 0;
+			intensitySF = nullptr;
 		}
 
 		//grid structure
@@ -253,7 +260,7 @@ CC_FILE_ERROR PTXFilter::loadFile(	QString filename,
 		bool hasIndexGrid = true;
 		try
 		{
-			grid->indexes.resize(gridSize,-1); //-1 means no cell/point
+			grid->indexes.resize(gridSize, -1); //-1 means no cell/point
 		}
 		catch (const std::bad_alloc&)
 		{
@@ -263,11 +270,11 @@ CC_FILE_ERROR PTXFilter::loadFile(	QString filename,
 
 		//read points
 		{
-			CCLib::NormalizedProgress nprogress(&pdlg, gridSize);
-			if (parameters.parentWidget)
+			CCLib::NormalizedProgress nprogress(pDlg.data(), gridSize);
+			if (pDlg)
 			{
-				pdlg.setInfo(qPrintable(QString("Number of cells: %1").arg(gridSize)));
-				pdlg.start();
+				pDlg->setInfo(qPrintable(QString("Number of cells: %1").arg(gridSize)));
+				pDlg->start();
 			}
 
 			bool firstPoint = true;
@@ -276,12 +283,12 @@ CC_FILE_ERROR PTXFilter::loadFile(	QString filename,
 			bool loadGridColors = false;
 			size_t gridIndex = 0;
 
-			for (unsigned j=0; j<height; ++j)
+			for (unsigned j = 0; j < height; ++j)
 			{
-				for (unsigned i=0; i<width; ++i, ++gridIndex)
+				for (unsigned i = 0; i < width; ++i, ++gridIndex)
 				{
 					QString line = inFile.readLine();
-					QStringList tokens = line.split(" ",QString::SkipEmptyParts);
+					QStringList tokens = line.split(" ", QString::SkipEmptyParts);
 
 					if (firstPoint)
 					{
@@ -317,7 +324,7 @@ CC_FILE_ERROR PTXFilter::loadFile(	QString filename,
 					}
 
 					double values[4];
-					for (int v=0; v<4; ++v)
+					for (int v = 0; v < 4; ++v)
 					{
 						bool ok;
 						values[v] = tokens[v].toDouble(&ok);
@@ -341,10 +348,13 @@ CC_FILE_ERROR PTXFilter::loadFile(	QString filename,
 							if (cloudIndex == 0 && !cloud->isShifted()) //in case the trans. matrix was ok!
 							{
 								CCVector3d P(Pd);
-								if (HandleGlobalShift(P,PshiftCloud,parameters))
+								if (HandleGlobalShift(P, PshiftCloud, preserveCoordinateShift, parameters))
 								{
-									cloud->setGlobalShift(PshiftCloud);
-									ccLog::Warning("[PTXFilter::loadFile] Cloud has been recentered! Translation: (%.2f ; %.2f ; %.2f)",PshiftCloud.x,PshiftCloud.y,PshiftCloud.z);
+									if (preserveCoordinateShift)
+									{
+										cloud->setGlobalShift(PshiftCloud);
+									}
+									ccLog::Warning("[PTXFilter::loadFile] Cloud has been recentered! Translation: (%.2f ; %.2f ; %.2f)", PshiftCloud.x, PshiftCloud.y, PshiftCloud.z);
 								}
 							}
 							firstPoint = false;
@@ -372,10 +382,10 @@ CC_FILE_ERROR PTXFilter::loadFile(	QString filename,
 					if (loadColors && (pointIsValid || loadGridColors))
 					{
 						ccColor::Rgb color;
-						for (int c=0; c<3; ++c)
+						for (int c = 0; c < 3; ++c)
 						{
 							bool ok;
-							unsigned temp = tokens[4+c].toUInt(&ok);
+							unsigned temp = tokens[4 + c].toUInt(&ok);
 							ok &= (temp <= 255);
 							if (ok)
 							{
@@ -392,7 +402,7 @@ CC_FILE_ERROR PTXFilter::loadFile(	QString filename,
 
 						if (pointIsValid)
 						{
-							cloud->addRGBColor(color.rgb);
+							cloud->addRGBColor(color);
 						}
 						if (loadGridColors)
 						{
@@ -414,9 +424,12 @@ CC_FILE_ERROR PTXFilter::loadFile(	QString filename,
 		if (cloud->size() == 0)
 		{
 			delete cloud;
-			cloud = 0;
+			cloud = nullptr;
 			if (intensitySF)
+			{
 				intensitySF->release();
+				intensitySF = nullptr;
+			}
 
 			ccLog::Warning(QString("[PTX] Scan #%1 is empty?!").arg(cloudIndex+1));
 		}
@@ -475,14 +488,14 @@ CC_FILE_ERROR PTXFilter::loadFile(	QString filename,
 			{
 				grid->validCount = static_cast<unsigned>(cloud->size());
 				grid->minValidIndex = 0;
-				grid->maxValidIndex = grid->validCount-1;
+				grid->maxValidIndex = grid->validCount - 1;
 				grid->sensorPosition = sensorTransD;
 				cloud->addGrid(grid);
 
 				//by default we don't compute normals without asking the user
 				if (parameters.autoComputeNormals)
 				{
-					cloud->computeNormalsWithGrids(LS, 2, true, parameters.parentWidget ? &normalsProgressDlg : 0);
+					cloud->computeNormalsWithGrids(1.0, normalsProgressDlg.data());
 				}
 			}
 
@@ -507,7 +520,7 @@ CC_FILE_ERROR PTXFilter::loadFile(	QString filename,
 			validIntensityRange = false;
 		}
 
-		for (unsigned i=0; i<container.getChildrenNumber(); ++i)
+		for (unsigned i = 0; i < container.getChildrenNumber(); ++i)
 		{
 			ccHObject* obj = container.getChild(i);
 			assert(obj && obj->isA(CC_TYPES::POINT_CLOUD));

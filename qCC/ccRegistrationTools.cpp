@@ -20,12 +20,12 @@
 //CCLib
 #include <MeshSamplingTools.h>
 #include <GenericIndexedCloudPersist.h>
-#include <SimpleCloud.h>
+#include <PointCloud.h>
 #include <RegistrationTools.h>
 #include <DistanceComputationTools.h>
 #include <CloudSamplingTools.h>
 #include <Garbage.h>
-#include <SortAlgo.h>
+#include <ParallelSort.h>
 
 //qCC_db
 #include <ccHObjectCaster.h>
@@ -140,7 +140,7 @@ bool ccRegistrationTools::ICP(	ccHObject* data,
 		//level = 8 if < 10.000.000
 		//level = 9 if > 10.000.000
 		int gridLevel = static_cast<int>(floor(log10(static_cast<double>(std::max(dataCloud->size(), modelCloud->size()))))) + 2;
-			gridLevel = std::min(std::max(gridLevel,7),9);
+		    gridLevel = std::min(std::max(gridLevel, 7), 9);
 		int result = -1;
 		if (modelMesh)
 		{
@@ -186,7 +186,9 @@ bool ccRegistrationTools::ICP(	ccHObject* data,
 			{
 				distances[i] = dataCloud->getPointScalarValue(i);
 			}
-			SortAlgo(distances.begin(), distances.end());
+			
+			ParallelSort(distances.begin(), distances.end());
+			
 			//now look for the max value at 'finalOverlapRatio+margin' percent
 			maxSearchDist = distances[static_cast<unsigned>(std::max(1.0,count*(finalOverlapRatio+s_overlapMarginRatio)))-1];
 		}

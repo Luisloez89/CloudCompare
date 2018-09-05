@@ -42,6 +42,8 @@ class QTextStream;
 //! Custom QListWidget to allow for the copy of all selected elements when using CTRL+C
 class ccCustomQListWidget : public QListWidget
 {
+	Q_OBJECT
+	
 public:
 
 	ccCustomQListWidget(QWidget* parent = 0) : QListWidget(parent) {}
@@ -95,10 +97,12 @@ public:
 						MainWindow* parentWindow = 0);
 
 	//! Returns the (unique) static instance
-	static ccConsole* TheInstance();
+	/** \param autoInit automatically initialize the console instance (with no widget!) if not done already
+	**/
+	static ccConsole* TheInstance(bool autoInit = true);
 
 	//! Releases unique instance
-	static void ReleaseInstance();
+	static void ReleaseInstance(bool flush = true);
 
 	//! Sets auto-refresh state
 	void setAutoRefresh(bool state);

@@ -29,7 +29,6 @@ ccProgressDialog::ccProgressDialog(	bool showCancelButton,
 	, m_lastRefreshValue(-1)
 {
 	setAutoClose(true);
-	setWindowModality(Qt::ApplicationModal);
 
 	resize(400, 200);
 	setRange(0, 100);
@@ -44,7 +43,7 @@ ccProgressDialog::ccProgressDialog(	bool showCancelButton,
 	}
 	setCancelButton(cancelButton);
 
-	connect(this, SIGNAL(scheduleRefresh()), this, SLOT(refresh()), Qt::QueuedConnection); //can't use DirectConnection here!
+	connect(this, &ccProgressDialog::scheduleRefresh, this, &ccProgressDialog::refresh, Qt::QueuedConnection); //can't use DirectConnection here!
 }
 
 void ccProgressDialog::refresh()

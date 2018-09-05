@@ -15,31 +15,33 @@
 //#                                                                        #
 //##########################################################################
 
-#include <QElapsedTimer>
-#include <QInputDialog>
-#include <QMessageBox>
+#include "ccLibAlgorithms.h"
 
-#include "ScalarField.h"
-#include "ScalarFieldTools.h"
+//CCLib
+#include <ScalarFieldTools.h>
 
+//qCC_db
+#include <ccOctree.h>
+#include <ccPointCloud.h>
+#include <ccScalarField.h>
+
+//Local
 #include "ccCommon.h"
 #include "ccConsole.h"
-
-#include "ccOctree.h"
-#include "ccPointCloud.h"
-
 #include "ccCurvatureDlg.h"
 #include "ccDensityDlg.h"
 #include "ccProgressDialog.h"
 #include "ccRegistrationTools.h"
-
-#include "ccLibAlgorithms.h"
 #include "ccUtils.h"
+
+//Qt
+#include <QElapsedTimer>
+#include <QInputDialog>
+#include <QMessageBox>
 
 // This is included only for temporarily removing an object from the tree.
 //	TODO figure out a cleaner way to do this without having to include all of mainwindow.h
 #include "mainwindow.h"
-
 
 namespace ccLibAlgorithms
 {
@@ -155,7 +157,7 @@ namespace ccLibAlgorithms
 				}
 				sfName = GetDensitySFName(densityType,true);
 			}
-				break;
+			break;
 				
 			case CCLIB_ALGO_ACCURATE_DENSITY:
 			{
@@ -197,7 +199,7 @@ namespace ccLibAlgorithms
 				
 				sfName = GetDensitySFName(densityType,algo == CCLIB_ALGO_APPROX_DENSITY,densityKernelSize);
 			}
-				break;
+			break;
 				
 			case CCLIB_ALGO_CURVATURE:
 			{
@@ -243,7 +245,7 @@ namespace ccLibAlgorithms
 				}
 				sfName = QString("%1 (%2)").arg(fieldName).arg(curvKernelSize);
 			}
-				break;
+			break;
 				
 			case CCLIB_ALGO_SF_GRADIENT:
 			{
@@ -262,7 +264,7 @@ namespace ccLibAlgorithms
 																	 QMessageBox::No ) == QMessageBox::Yes );
 				}
 			}
-				break;
+			break;
 				
 			case CCLIB_ALGO_ROUGHNESS:
 			case CCLIB_SPHERICAL_NEIGHBOURHOOD_EXTRACTION_TEST: //for tests: we'll use the roughness kernel for SNE
@@ -289,14 +291,14 @@ namespace ccLibAlgorithms
 				
 				sfName = QString(CC_ROUGHNESS_FIELD_NAME) + QString("(%1)").arg(roughnessKernelSize);
 			}
-				break;
+			break;
 				
 			default:
 				assert(false);
 				return false;
 		}
 		
-		for (size_t i=0; i<selNum; ++i)
+		for (size_t i = 0; i < selNum; ++i)
 		{
 			//is the ith selected data is eligible for processing?
 			ccGenericPointCloud* cloud = 0;
@@ -305,10 +307,10 @@ namespace ccLibAlgorithms
 				case CCLIB_ALGO_SF_GRADIENT:
 					//for scalar field gradient, we can apply it directly on meshes
 					bool lockedVertices;
-					cloud = ccHObjectCaster::ToGenericPointCloud(entities[i],&lockedVertices);
+					cloud = ccHObjectCaster::ToGenericPointCloud(entities[i], &lockedVertices);
 					if (lockedVertices)
 					{
-						ccUtils::DisplayLockedVerticesWarning(entities[i]->getName(),selNum == 1);
+						ccUtils::DisplayLockedVerticesWarning(entities[i]->getName(), selNum == 1);
 						cloud = 0;
 					}
 					if (cloud)
@@ -317,7 +319,6 @@ namespace ccLibAlgorithms
 						if (cloud->isA(CC_TYPES::POINT_CLOUD))
 						{
 							ccPointCloud* pc = static_cast<ccPointCloud*>(cloud);
-							//on met en lecture (OUT) le champ scalaire actuellement affiche
 							int outSfIdx = pc->getCurrentDisplayedScalarFieldIndex();
 							if (outSfIdx < 0)
 							{
@@ -325,8 +326,9 @@ namespace ccLibAlgorithms
 							}
 							else
 							{
+								//we set as 'output' SF the currently displayed scalar field
 								pc->setCurrentOutScalarField(outSfIdx);
-								sfName = QString("%1(%2)").arg(CC_GRADIENT_NORMS_FIELD_NAME).arg(pc->getScalarFieldName(outSfIdx));
+								sfName = QString("%1(%2)").arg(CC_GRADIENT_NORMS_FIELD_NAME, pc->getScalarFieldName(outSfIdx));
 							}
 						}
 						else //if (!cloud->hasDisplayedScalarField()) //TODO: displayed but not necessarily set as OUTPUT!
@@ -363,13 +365,20 @@ namespace ccLibAlgorithms
 					}
 				}
 				
-				ccProgressDialog pDlg(true, parent);
+				QScopedPointer<ccProgressDialog> pDlg;
+				if (parent)
+				{
+					pDlg.reset(new ccProgressDialog(true, parent));
+				}
 				
 				ccOctree::Shared octree = cloud->getOctree();
 				if (!octree)
 				{
-					pDlg.show();
-					octree = cloud->computeOctree(&pDlg);
+					if (pDlg)
+					{
+						pDlg->show();
+					}
+					octree = cloud->computeOctree(pDlg.data());
 					if (!octree)
 					{
 						ccConsole::Error(QString("Couldn't compute octree for cloud '%1'!").arg(cloud->getName()));
@@ -385,7 +394,7 @@ namespace ccLibAlgorithms
 					case CCLIB_ALGO_APPROX_DENSITY:
 						result = CCLib::GeometricalAnalysisTools::computeLocalDensityApprox(cloud,
 																							densityType,
-																							&pDlg,
+																							pDlg.data(),
 																							octree.data());
 						break;
 						
@@ -393,7 +402,7 @@ namespace ccLibAlgorithms
 						result = CCLib::GeometricalAnalysisTools::computeLocalDensity(	cloud,
 																						densityType,
 																						densityKernelSize,
-																						&pDlg,
+																						pDlg.data(),
 																						octree.data());
 						break;
 						
@@ -401,7 +410,7 @@ namespace ccLibAlgorithms
 						result = CCLib::GeometricalAnalysisTools::computeCurvature(	cloud,
 																					curvType,
 																					curvKernelSize,
-																					&pDlg,
+																					pDlg.data(),
 																					octree.data());
 						break;
 						
@@ -410,24 +419,14 @@ namespace ccLibAlgorithms
 																						0, //auto --> FIXME: should be properly set by the user!
 																						euclidean,
 																						false,
-																						&pDlg,
+																						pDlg.data(),
 																						octree.data());
-						
-						//rename output scalar field
-						if (result == 0)
-						{
-							int outSfIdx = pc->getCurrentDisplayedScalarFieldIndex();
-							assert(outSfIdx >= 0);
-							sfName = QString("%1.gradient").arg(pc->getScalarFieldName(outSfIdx));
-							pc->renameScalarField(outSfIdx, qPrintable(sfName));
-						}
-						//*/
 						break;
 						
 					case CCLIB_ALGO_ROUGHNESS:
 						result = CCLib::GeometricalAnalysisTools::computeRoughness(	cloud,
 																					roughnessKernelSize,
-																					&pDlg,
+																					pDlg.data(),
 																					octree.data());
 						break;
 						
@@ -437,7 +436,7 @@ namespace ccLibAlgorithms
 						unsigned count = cloud->size();
 						cloud->enableScalarField();
 						{
-							for (unsigned j=0; j<count; ++j)
+							for (unsigned j = 0; j < count; ++j)
 								cloud->setPointScalarValue(j, NAN_VALUE);
 						}
 

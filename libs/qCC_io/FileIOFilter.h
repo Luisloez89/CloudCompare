@@ -66,10 +66,12 @@ public: //initialization
 		LoadParameters()
 			: shiftHandlingMode(ccGlobalShiftManager::DIALOG_IF_NECESSARY)
 			, alwaysDisplayLoadDialog(true)
-			, coordinatesShiftEnabled(0)
-			, coordinatesShift(0)
+			, coordinatesShiftEnabled(nullptr)
+			, coordinatesShift(nullptr)
+			, preserveShiftOnSave(true)
 			, autoComputeNormals(false)
-			, parentWidget(0)
+			, parentWidget(nullptr)
+			, sessionStart(true)
 		{}
 
 		//! How to handle big coordinates
@@ -80,10 +82,14 @@ public: //initialization
 		bool* coordinatesShiftEnabled;
 		//! If applicable, applied shift on load (optional)
 		CCVector3d* coordinatesShift;
+		//! If applicable, whether shift should be preserved or not (optional)
+		bool preserveShiftOnSave;
 		//! Whether normals should be computed at loading time (if possible - e.g. for gridded clouds) or not
 		bool autoComputeNormals;
 		//! Parent widget (if any)
 		QWidget* parentWidget;
+		//! Session start (whether the load action is the first of a session)
+		bool sessionStart;
 	};
 
 	//! Generic saving parameters
@@ -92,7 +98,7 @@ public: //initialization
 		//! Default constructor
 		SaveParameters()
 			: alwaysDisplaySaveDialog(true)
-			, parentWidget(0)
+			, parentWidget(nullptr)
 		{}
 
 		//! Wether to always display a dialog (if any), even if automatic guess is possible
@@ -116,7 +122,7 @@ public: //public interface (to be reimplemented by each I/O filter)
 		\param parameters generic loading parameters
 		\return error
 	**/
-	virtual CC_FILE_ERROR loadFile(	QString filename,
+	virtual CC_FILE_ERROR loadFile(	const QString& filename,
 									ccHObject& container,
 									LoadParameters& parameters)
 	{
@@ -134,8 +140,8 @@ public: //public interface (to be reimplemented by each I/O filter)
 		\return error
 	**/
 	virtual CC_FILE_ERROR saveToFile(	ccHObject* entity,
-										QString filename,
-										SaveParameters& parameters)
+										const QString& filename,
+										const SaveParameters& parameters)
 	{
 		 return CC_FERR_NOT_IMPLEMENTED;
 	}
@@ -160,7 +166,7 @@ public: //public interface (to be reimplemented by each I/O filter)
 	/** \param upperCaseExt upper case extension
 		\return whether the extension is (theoretically) handled by this filter
 	**/
-	virtual bool canLoadExtension(QString upperCaseExt) const = 0;
+	virtual bool canLoadExtension(const QString& upperCaseExt) const = 0;
 
 	//! Returns whether this I/O filter can save the specified type of entity
 	/** \param type entity type
@@ -177,6 +183,7 @@ public: //static methods
 		\param filename filename
 		\param parameters generic loading parameters
 		\param filter input filter
+		\param[out] result file error code
 		\return loaded entities (or 0 if an error occurred)
 	**/
 	QCC_IO_LIB_API static ccHObject* LoadFromFile(	const QString& filename,
@@ -188,6 +195,7 @@ public: //static methods
 	/** Shortcut to the other version of FileIOFilter::LoadFromFile
 		\param filename filename
 		\param parameters generic loading parameters
+		\param[out] result file error code
 		\param fileFilter input filter 'file filter' (if empty, the best I/O filter will be guessed from the file extension)
 		\return loaded entities (or 0 if an error occurred)
 	**/
@@ -206,7 +214,7 @@ public: //static methods
 	**/
 	QCC_IO_LIB_API static CC_FILE_ERROR SaveToFile(	ccHObject* entities,
 													const QString& filename,
-													SaveParameters& parameters,
+													const SaveParameters& parameters,
 													Shared filter);
 
 	//! Saves an entity (or a group of) to a specific file thanks to a given filter
@@ -219,18 +227,20 @@ public: //static methods
 	**/
 	QCC_IO_LIB_API static CC_FILE_ERROR SaveToFile(	ccHObject* entities,
 													const QString& filename,
-													SaveParameters& parameters,
-													QString fileFilter);
+													const SaveParameters& parameters,
+													const QString& fileFilter);
 
 	//! Shortcut to the ccGlobalShiftManager mechanism specific for files
 	/** \param[in] P sample point (typically the first loaded)
 		\param[out] Pshift global shift
+		\param[out] preserveCoordinateShift whether shift sould be preserved on save
 		\param[in] loadParameters loading parameters
 		\param[in] useInputCoordinatesShiftIfPossible whether to use the input 'PShift' vector if possible
 		\return whether global shift has been defined/enabled
 	**/
 	QCC_IO_LIB_API static bool HandleGlobalShift(	const CCVector3d& P,
 													CCVector3d& Pshift,
+													bool& preserveCoordinateShift,
 													LoadParameters& loadParameters,
 													bool useInputCoordinatesShiftIfPossible = false);
 
@@ -244,7 +254,17 @@ public: //static methods
 									const QString& filename);
 
 	//! Returns whether special characters are present in the input string
-	QCC_IO_LIB_API static bool CheckForSpecialChars(QString filename);
+	QCC_IO_LIB_API static bool CheckForSpecialChars(const QString& filename);
+
+public: //loading "sessions" management
+
+	//! Indicates to the I/O filters that a new loading/saving session has started (for "Apply all" buttons for instance)
+	QCC_IO_LIB_API static void ResetSesionCounter();
+
+	//! Indicates to the I/O filters that a new loading/saving action has started
+	/** \return the updated session counter
+	**/
+	QCC_IO_LIB_API static unsigned IncreaseSesionCounter();
 
 public: //global filters registration mechanism
 
@@ -255,10 +275,10 @@ public: //global filters registration mechanism
 	QCC_IO_LIB_API static void Register(Shared filter);
 
 	//! Returns the filter corresponding to the given 'file filter'
-	QCC_IO_LIB_API static Shared GetFilter(QString fileFilter, bool onImport);
+	QCC_IO_LIB_API static Shared GetFilter(const QString& fileFilter, bool onImport);
 
 	//! Returns the best filter (presumably) to open a given file extension
-	QCC_IO_LIB_API static Shared FindBestFilterForExtension(QString ext);
+	QCC_IO_LIB_API static Shared FindBestFilterForExtension(const QString& ext);
 
 	//! Type of a I/O filters container
 	typedef std::vector< FileIOFilter::Shared > FilterContainer;

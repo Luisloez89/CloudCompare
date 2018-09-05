@@ -24,6 +24,8 @@
 //CCLib
 #include <CCGeom.h>
 #include <DgmOctreeReferenceCloud.h>
+#include <GenericIndexedMesh.h>
+#include <GenericProgressCallback.h>
 #include <Neighbourhood.h>
 
 //System
@@ -53,15 +55,12 @@ void ccNormalVectors::ReleaseUniqueInstance()
 }
 
 ccNormalVectors::ccNormalVectors()
-	: m_theNormalHSVColors(0)
 {
 	init();
 }
 
 ccNormalVectors::~ccNormalVectors()
 {
-	if (m_theNormalHSVColors)
-		delete[] m_theNormalHSVColors;
 }
 
 CompressedNormType ccNormalVectors::GetNormIndex(const PointCoordinateType N[])
@@ -73,8 +72,10 @@ CompressedNormType ccNormalVectors::GetNormIndex(const PointCoordinateType N[])
 
 bool ccNormalVectors::enableNormalHSVColorsArray()
 {
-	if (m_theNormalHSVColors)
+	if (!m_theNormalHSVColors.empty())
+	{
 		return true;
+	}
 
 	if (m_theNormalVectors.empty())
 	{
@@ -82,36 +83,28 @@ bool ccNormalVectors::enableNormalHSVColorsArray()
 		return false;
 	}
 
-	m_theNormalHSVColors = new ColorCompType[m_theNormalVectors.size() * 3];
-	if (!m_theNormalHSVColors)
+	try
+	{
+		m_theNormalHSVColors.resize(m_theNormalVectors.size());
+	}
+	catch (const std::bad_alloc&)
 	{
 		//not enough memory
 		return false;
 	}
 
-	ColorCompType* rgb = m_theNormalHSVColors;
-	for (size_t i = 0; i < m_theNormalVectors.size(); ++i, rgb += 3)
+	for (size_t i = 0; i < m_theNormalVectors.size(); ++i)
 	{
-		ccColor::Rgb col = ccNormalVectors::ConvertNormalToRGB(m_theNormalVectors[i]);
-		rgb[0] = col.r;
-		rgb[1] = col.g;
-		rgb[2] = col.b;
+		m_theNormalHSVColors[i] = ccNormalVectors::ConvertNormalToRGB(m_theNormalVectors[i]);
 	}
 
-	return (m_theNormalHSVColors != 0);
+	return true;
 }
 
-const ColorCompType* ccNormalVectors::getNormalHSVColor(unsigned index) const
+const ccColor::Rgb& ccNormalVectors::getNormalHSVColor(unsigned index) const
 {
-	assert(m_theNormalHSVColors);
 	assert(index < m_theNormalVectors.size());
-	return m_theNormalHSVColors+3*index;
-}
-
-const ColorCompType* ccNormalVectors::getNormalHSVColorArray() const
-{
-	assert(m_theNormalHSVColors);
-	return m_theNormalHSVColors;
+	return m_theNormalHSVColors[index];
 }
 
 bool ccNormalVectors::init()
@@ -292,7 +285,6 @@ PointCoordinateType ccNormalVectors::GuessBestRadius(	ccGenericPointCloud* cloud
 		double aimedPop = s_aimedPop;
 		PointCoordinateType radius = bestRadius;
 		PointCoordinateType lastRadius = radius;
-		double bestMeanPop = 0;
 		double lastMeanPop = 0;
 
 		std::random_device rd;   // non-deterministic generator
@@ -357,7 +349,6 @@ PointCoordinateType ccNormalVectors::GuessBestRadius(	ccGenericPointCloud* cloud
 			{
 				//we have found a correct radius
 				bestRadius = radius;
-				bestMeanPop = meanPop;
 
 				if (aboveMinPopRatio < s_minAboveMinRatio)
 				{
@@ -379,9 +370,8 @@ PointCoordinateType ccNormalVectors::GuessBestRadius(	ccGenericPointCloud* cloud
 			{
 				//this is our best (only) guess for the moment
 				bestRadius = radius;
-				bestMeanPop = meanPop;
 
-				newRadius = radius * sqrt(aimedPop/meanPop);
+				newRadius = radius * sqrt(aimedPop / meanPop);
 			}
 			else
 			{
@@ -389,7 +379,6 @@ PointCoordinateType ccNormalVectors::GuessBestRadius(	ccGenericPointCloud* cloud
 				if (fabs(meanPop - aimedPop) < fabs(bestRadius - aimedPop))
 				{
 					bestRadius = radius;
-					bestMeanPop = meanPop;
 				}
 
 				double slope = (radius*radius - lastRadius*lastRadius) / (meanPop - lastMeanPop);
@@ -451,7 +440,7 @@ bool ccNormalVectors::ComputeCloudNormals(	ccGenericPointCloud* theCloud,
 	//reserve some memory to store the (compressed) normals
 	if (!theNormsCodes.isAllocated() || theNormsCodes.currentSize() < pointCount)
 	{
-		if (!theNormsCodes.resize(pointCount))
+		if (!theNormsCodes.resizeSafe(pointCount))
 		{
 			if (theOctree && !inputOctree)
 				delete theOctree;
@@ -461,8 +450,8 @@ bool ccNormalVectors::ComputeCloudNormals(	ccGenericPointCloud* theCloud,
 
 	//we instantiate 3D normal vectors
 	NormsTableType* theNorms = new NormsTableType;
-	CCVector3 blankN(0, 0, 0);
-	if (!theNorms->resize(pointCount, true, blankN.u))
+	static const CCVector3 blankN(0, 0, 0);
+	if (!theNorms->resizeSafe(pointCount, true, &blankN))
 	{
 		theNormsCodes.clear();
 		if (theOctree && !inputOctree)
@@ -524,14 +513,12 @@ bool ccNormalVectors::ComputeCloudNormals(	ccGenericPointCloud* theCloud,
 	}
 
 	//we 'compress' each normal
-	theNormsCodes.fill(0);
-	theNorms->placeIteratorAtBegining();
+	std::fill(theNormsCodes.begin(), theNormsCodes.end(), 0);
 	for (unsigned i = 0; i < pointCount; i++)
 	{
-		const PointCoordinateType* N = theNorms->getCurrentValue();
+		const CCVector3& N = theNorms->at(i);
 		CompressedNormType nCode = GetNormIndex(N);
 		theNormsCodes.setValue(i, nCode);
-		theNorms->forwardIterator();
 	}
 
 	theNorms->release();
@@ -641,7 +628,7 @@ bool ccNormalVectors::ComputeNormalWithTri(CCLib::GenericIndexedCloudPersist* po
 	unsigned triCount = theMesh->size();
 
 	//for all triangles
-	theMesh->placeIteratorAtBegining();
+	theMesh->placeIteratorAtBeginning();
 	for (unsigned j = 0; j < triCount; ++j)
 	{
 		//we can't use getNextTriangleVertIndexes (which is faster on mesh groups but not multi-thread compatible) but anyway we'll never get mesh groups here!
@@ -700,6 +687,12 @@ bool ccNormalVectors::ComputeNormsAtLevelWithQuadric(	const CCLib::DgmOctree::oc
 
 		//warning: there may be more points at the end of nNSS.pointsInNeighbourhood than the actual nearest neighbors (k)!
 		unsigned k = cell.parentOctree->findNeighborsInASphereStartingFromCell(nNSS, radius, false);
+		float cur_radius = radius;
+		while (k < NUMBER_OF_POINTS_FOR_NORM_WITH_QUADRIC && cur_radius < 16*radius)
+		{
+			cur_radius *= 1.189207115f;
+			k = cell.parentOctree->findNeighborsInASphereStartingFromCell(nNSS, cur_radius, false);
+		}
 		if (k >= NUMBER_OF_POINTS_FOR_NORM_WITH_QUADRIC)
 		{
 			CCLib::DgmOctreeReferenceCloud neighbours(&nNSS.pointsInNeighbourhood, k);
@@ -707,7 +700,7 @@ bool ccNormalVectors::ComputeNormsAtLevelWithQuadric(	const CCLib::DgmOctree::oc
 			CCVector3 N;
 			if (ComputeNormalWithQuadric(&neighbours, nNSS.queryPoint, N))
 			{
-				theNorms->setValue(cell.points->getPointGlobalIndex(i), N.u);
+				theNorms->setValue(cell.points->getPointGlobalIndex(i), N);
 			}
 		}
 
@@ -751,6 +744,12 @@ bool ccNormalVectors::ComputeNormsAtLevelWithLS(const CCLib::DgmOctree::octreeCe
 
 		//warning: there may be more points at the end of nNSS.pointsInNeighbourhood than the actual nearest neighbors (k)!
 		unsigned k = cell.parentOctree->findNeighborsInASphereStartingFromCell(nNSS, radius, false);
+		float cur_radius = radius;
+		while (k < NUMBER_OF_POINTS_FOR_NORM_WITH_LS && cur_radius < 16*radius)
+		{
+			cur_radius *= 1.189207115f;
+			k = cell.parentOctree->findNeighborsInASphereStartingFromCell(nNSS, cur_radius, false);
+		}
 		if (k >= NUMBER_OF_POINTS_FOR_NORM_WITH_LS)
 		{
 			CCLib::DgmOctreeReferenceCloud neighbours(&nNSS.pointsInNeighbourhood, k);
@@ -758,7 +757,7 @@ bool ccNormalVectors::ComputeNormsAtLevelWithLS(const CCLib::DgmOctree::octreeCe
 			CCVector3 N;
 			if (ComputeNormalWithLS(&neighbours, N))
 			{
-				theNorms->setValue(cell.points->getPointGlobalIndex(i), N.u);
+				theNorms->setValue(cell.points->getPointGlobalIndex(i), N);
 			}
 		}
 
@@ -811,7 +810,7 @@ bool ccNormalVectors::ComputeNormsAtLevelWithTri(	const CCLib::DgmOctree::octree
 			CCVector3 N;
 			if (ComputeNormalWithTri(&neighbours, N))
 			{
-				theNorms->setValue(cell.points->getPointGlobalIndex(i), N.u);
+				theNorms->setValue(cell.points->getPointGlobalIndex(i), N);
 			}
 		}
 
@@ -914,7 +913,7 @@ CCVector3 ccNormalVectors::ConvertDipAndDipDirToNormal(PointCoordinateType dip_d
 	//internal consistency test
 	PointCoordinateType dip2, dipDir2;
 	ConvertNormalToDipAndDipDir(N, dip2, dipDir2);
-	assert(fabs(dip2 - dip_deg) < 1.0e-3 && fabs(dipDir2 - dipDir_deg) < 1.0e-3);
+	assert(fabs(dip2 - dip_deg) < 1.0e-3 && (dip2 == 0 || fabs(dipDir2 - dipDir_deg) < 1.0e-3));
 #endif
 
 	if (!upward)

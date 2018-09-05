@@ -21,18 +21,11 @@
 #include "ccGenericGLDisplay.h"
 
 //Qt
-#include <QDataStream>
-#include <QStringList>
-#include <QString>
-#include <QFile>
 #include <QFileInfo>
-#include <QTextStream>
-#include <QMap>
+#include <QImage>
 #include <QSet>
 
 //System
-#include <string.h>
-#include <assert.h>
 #include <set>
 
 ccMaterialSet::ccMaterialSet(QString name/*=QString()*/)
@@ -268,6 +261,16 @@ bool ccMaterialSet::ParseMTL(QString path, const QString& filename, ccMaterialSe
 				//DGM: in case there's hidden or space characters at the beginning of the line...
 				int shift = currentLine.indexOf("map_K",0);
 				QString textureFilename = (shift + 7 < currentLine.size() ? currentLine.mid(shift+7).trimmed() : QString());
+				//remove any quotes around the filename (Photoscan 1.4 bug)
+				if (textureFilename.startsWith("\""))
+				{
+					textureFilename = textureFilename.right(textureFilename.size() - 1);
+				}
+				if (textureFilename.endsWith("\""))
+				{
+					textureFilename = textureFilename.left(textureFilename.size() - 1);
+				}
+
 				QString fullTexName = path + QString('/') + textureFilename;
 				if (!currentMaterial->loadAndSetTexture(fullTexName))
 				{
@@ -357,7 +360,7 @@ bool ccMaterialSet::saveAsMTL(QString path, const QString& baseFilename, QString
 				}
 				else
 				{
-					errors << QString("Failed to save the texture of material '%1' to file '%2'!").arg(mtl->getName()).arg(destFilename);
+					errors << QString("Failed to save the texture of material '%1' to file '%2'!").arg(mtl->getName(),destFilename);
 				}
 			}
 

@@ -21,22 +21,26 @@
 #include "ccContourExtractorDlg.h"
 
 //qCC_db
+#include <cc2DLabel.h>
 #include <ccLog.h>
 #include <ccPointCloud.h>
-#include <cc2DLabel.h>
 
 //qCC_gl
 #include <ccGLWindow.h>
 
 //CCLib
-#include <Neighbourhood.h>
 #include <DistanceComputationTools.h>
+#include <Neighbourhood.h>
 #include <PointProjectionTools.h>
+
+#ifdef USE_TBB
+#include <tbb/parallel_for.h>
+#endif
 
 //System
 #include <assert.h>
+#include <cmath>
 #include <set>
-#include <math.h>
 
 //list of already used point to avoid hull's inner loops
 enum HullPointFlags {	POINT_NOT_USED	= 0,
@@ -71,22 +75,77 @@ struct Edge
 //! Finds the nearest (available) point to an edge
 /** \return The nearest point distance (or -1 if no point was found!)
 **/
-PointCoordinateType FindNearestCandidate(	unsigned& minIndex,
-											const VertexIterator& itA,
-											const VertexIterator& itB,
-											const std::vector<Vertex2D>& points,
-											const std::vector<HullPointFlags>& pointFlags,
-											PointCoordinateType minSquareEdgeLength,
-											PointCoordinateType maxSquareEdgeLength,
-											bool allowLongerChunks = false,
-											double minCosAngle = -1.0)
+static PointCoordinateType FindNearestCandidate(unsigned& minIndex,
+												const VertexIterator& itA,
+												const VertexIterator& itB,
+												const std::vector<Vertex2D>& points,
+												const std::vector<HullPointFlags>& pointFlags,
+												PointCoordinateType minSquareEdgeLength,
+												bool allowLongerChunks = false,
+												double minCosAngle = -1.0)
 {
 	//look for the nearest point in the input set
 	PointCoordinateType minDist2 = -1;
-	CCVector2 AB = **itB-**itA;
-	PointCoordinateType squareLengthAB = AB.norm2();
-	unsigned pointCount = static_cast<unsigned>(points.size());
-	for (unsigned i=0; i<pointCount; ++i)
+	const CCVector2 AB = **itB-**itA;
+	const PointCoordinateType squareLengthAB = AB.norm2();
+	const unsigned pointCount = static_cast<unsigned>(points.size());
+
+#ifdef USE_TBB
+	tbb::parallel_for( static_cast<unsigned int>(0), pointCount, [&](unsigned int i) {
+		const Vertex2D& P = points[i];
+		if (pointFlags[P.index] != POINT_NOT_USED)
+			return;
+
+		//skip the edge vertices!
+		if (P.index == (*itA)->index || P.index == (*itB)->index)
+		{
+			return;
+		}
+
+		//we only consider 'inner' points
+		const CCVector2 AP = P-**itA;
+		if (AB.x * AP.y - AB.y * AP.x < 0)
+		{
+			return;
+		}
+
+		//check the angle
+		if (minCosAngle > -1.0)
+		{
+			const CCVector2 PB = **itB - P;
+			const PointCoordinateType dotProd = AP.x * PB.x + AP.y * PB.y;
+			const PointCoordinateType minDotProd = static_cast<PointCoordinateType>(minCosAngle * std::sqrt(AP.norm2() * PB.norm2()));
+			if (dotProd < minDotProd)
+			{
+				return;
+			}
+		}
+
+		const PointCoordinateType dot = AB.dot(AP); // = cos(PAB) * ||AP|| * ||AB||
+		if (dot >= 0 && dot <= squareLengthAB)
+		{
+			const CCVector2 HP = AP - AB * (dot / squareLengthAB);
+			const PointCoordinateType dist2 = HP.norm2();
+			if (minDist2 < 0 || dist2 < minDist2)
+			{
+				//the 'nearest' point must also be a valid candidate
+				//(i.e. at least one of the created edges is smaller than the original one
+				//and we don't create too small edges!)
+				const PointCoordinateType squareLengthAP = AP.norm2();
+				const PointCoordinateType squareLengthBP = (P-**itB).norm2();
+				if (	squareLengthAP >= minSquareEdgeLength
+					&&	squareLengthBP >= minSquareEdgeLength
+					&&	(allowLongerChunks || (squareLengthAP < squareLengthAB || squareLengthBP < squareLengthAB))
+					)
+				{
+					minDist2 = dist2;
+					minIndex = i;
+				}
+			}
+		}
+	} );
+#else
+	for (unsigned i = 0; i < pointCount; ++i)
 	{
 		const Vertex2D& P = points[i];
 		if (pointFlags[P.index] != POINT_NOT_USED)
@@ -99,7 +158,7 @@ PointCoordinateType FindNearestCandidate(	unsigned& minIndex,
 		}
 
 		//we only consider 'inner' points
-		CCVector2 AP = P-**itA;
+		CCVector2 AP = P - **itA;
 		if (AB.x * AP.y - AB.y * AP.x < 0)
 		{
 			continue;
@@ -110,7 +169,7 @@ PointCoordinateType FindNearestCandidate(	unsigned& minIndex,
 		{
 			CCVector2 PB = **itB - P;
 			PointCoordinateType dotProd = AP.x * PB.x + AP.y * PB.y;
-			PointCoordinateType minDotProd = static_cast<PointCoordinateType>(minCosAngle * sqrt(AP.norm2() * PB.norm2()));
+			PointCoordinateType minDotProd = static_cast<PointCoordinateType>(minCosAngle * std::sqrt(AP.norm2() * PB.norm2()));
 			if (dotProd < minDotProd)
 			{
 				continue;
@@ -128,7 +187,7 @@ PointCoordinateType FindNearestCandidate(	unsigned& minIndex,
 				//(i.e. at least one of the created edges is smaller than the original one
 				//and we don't create too small edges!)
 				PointCoordinateType squareLengthAP = AP.norm2();
-				PointCoordinateType squareLengthBP = (P-**itB).norm2();
+				PointCoordinateType squareLengthBP = (P - **itB).norm2();
 				if (	squareLengthAP >= minSquareEdgeLength
 					&&	squareLengthBP >= minSquareEdgeLength
 					&&	(allowLongerChunks || (squareLengthAP < squareLengthAB || squareLengthBP < squareLengthAB))
@@ -140,6 +199,8 @@ PointCoordinateType FindNearestCandidate(	unsigned& minIndex,
 			}
 		}
 	}
+#endif
+	
 	return (minDist2 < 0 ? minDist2 : minDist2/squareLengthAB);
 }
 
@@ -172,7 +233,7 @@ bool ccContourExtractor::ExtractConcaveHull2D(	std::vector<Vertex2D>& points,
 		return false;
 	}
 
-	double minCosAngle = maxAngleDeg <= 0 ? -1.0 : cos(maxAngleDeg * M_PI / 180.0);
+	double minCosAngle = maxAngleDeg <= 0 ? -1.0 : std::cos(maxAngleDeg * M_PI / 180.0);
 
 	//hack: compute the theoretical 'minimal' edge length
 	PointCoordinateType minSquareEdgeLength = 0;
@@ -193,8 +254,8 @@ bool ccContourExtractor::ExtractConcaveHull2D(	std::vector<Vertex2D>& points,
 				minP = maxP = P;
 			}
 		}
-		minSquareEdgeLength = (maxP-minP).norm2() / static_cast<PointCoordinateType>(1.0e7); //10^-7 of the max bounding rectangle side
-		minSquareEdgeLength = std::min(minSquareEdgeLength, maxSquareEdgeLength/10);
+		minSquareEdgeLength = (maxP - minP).norm2() / static_cast<PointCoordinateType>(1.0e7); //10^-7 of the max bounding rectangle side
+		minSquareEdgeLength = std::min(minSquareEdgeLength, maxSquareEdgeLength / 10);
 
 		//we remove very small edges
 		for (VertexIterator itA = hullPoints.begin(); itA != hullPoints.end(); ++itA)
@@ -370,13 +431,12 @@ bool ccContourExtractor::ExtractConcaveHull2D(	std::vector<Vertex2D>& points,
 						points,
 						pointFlags,
 						minSquareEdgeLength,
-						maxSquareEdgeLength,
 						step > 1,
 						minCosAngle);
 
 					if (minSquareDist >= 0)
 					{
-						Edge e(itA,nearestPointIndex,minSquareDist);
+						Edge e(itA, nearestPointIndex, minSquareDist);
 						edges.insert(e);
 					}
 				}
@@ -410,7 +470,7 @@ bool ccContourExtractor::ExtractConcaveHull2D(	std::vector<Vertex2D>& points,
 				//create labels
 				cc2DLabel* edgeLabel = 0;
 				cc2DLabel* label = 0;
-				if (enableVisualDebugMode && !debugDialog.isSkipepd())
+				if (enableVisualDebugMode && !debugDialog.isSkipped())
 				{
 					edgeLabel = new cc2DLabel("edge");
 					unsigned indexA = 0;
@@ -485,7 +545,7 @@ bool ccContourExtractor::ExtractConcaveHull2D(	std::vector<Vertex2D>& points,
 
 					somethingHasChanged = true;
 
-					if (enableVisualDebugMode && !debugDialog.isSkipepd())
+					if (enableVisualDebugMode && !debugDialog.isSkipped())
 					{
 						if (debugContour)
 						{
@@ -532,7 +592,7 @@ bool ccContourExtractor::ExtractConcaveHull2D(	std::vector<Vertex2D>& points,
 						}
 
 						//update the removed edges info and put them back in the main list
-						for (size_t i=0; i<removed.size(); ++i)
+						for (size_t i = 0; i < removed.size(); ++i)
 						{
 							VertexIterator itC = removed[i];
 							VertexIterator itD = itC; ++itD;
@@ -547,13 +607,12 @@ bool ccContourExtractor::ExtractConcaveHull2D(	std::vector<Vertex2D>& points,
 								points,
 								pointFlags,
 								minSquareEdgeLength,
-								maxSquareEdgeLength,
 								false,
 								minCosAngle);
 
 							if (minSquareDist >= 0)
 							{
-								Edge e(itC,nearestPointIndex,minSquareDist);
+								Edge e(itC, nearestPointIndex, minSquareDist);
 								edges.insert(e);
 							}
 						}
@@ -570,7 +629,6 @@ bool ccContourExtractor::ExtractConcaveHull2D(	std::vector<Vertex2D>& points,
 							points,
 							pointFlags,
 							minSquareEdgeLength,
-							maxSquareEdgeLength,
 							false,
 							minCosAngle);
 
@@ -590,7 +648,6 @@ bool ccContourExtractor::ExtractConcaveHull2D(	std::vector<Vertex2D>& points,
 							points,
 							pointFlags,
 							minSquareEdgeLength,
-							maxSquareEdgeLength,
 							false,
 							minCosAngle);
 
@@ -660,17 +717,17 @@ ccPolyline* ccContourExtractor::ExtractFlatContour(	CCLib::GenericIndexedCloudPe
 		return 0;
 
 	CCLib::Neighbourhood Yk(points);
-	CCVector3 O,X,Y; //local base
+	CCVector3 O, X, Y; //local base
 	bool useOXYasBase = false;
 
 	//we project the input points on a plane
 	std::vector<Vertex2D> points2D;
 	PointCoordinateType* planeEq = 0;
 	//if the user has specified a default direction, we'll use it as 'projecting plane'
-	PointCoordinateType preferredPlaneEq[4] = {0, 0, 0, 0};
+	PointCoordinateType preferredPlaneEq[4] = {0, 0, 1, 0};
 	if (preferredNormDim != 0)
 	{
-		const CCVector3* G = points->getPoint(0); //any point through which the point passes is ok
+		const CCVector3* G = points->getPoint(0); //any point through which the plane passes is ok
 		preferredPlaneEq[0] = preferredNormDim[0];
 		preferredPlaneEq[1] = preferredNormDim[1];
 		preferredPlaneEq[2] = preferredNormDim[2];
@@ -800,5 +857,4 @@ bool ccContourExtractor::ExtractFlatContour(CCLib::GenericIndexedCloudPersist* p
 	basePoly = 0;
 
 	return success;
-
 }

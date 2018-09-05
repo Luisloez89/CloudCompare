@@ -24,7 +24,6 @@
 #include "ccPointCloud.h"
 #include "ccCone.h"
 
-
 ccPolyline::ccPolyline(GenericIndexedCloudPersist* associatedCloud)
 	: Polyline(associatedCloud)
 	, ccShiftedObject("Polyline")
@@ -37,7 +36,7 @@ ccPolyline::ccPolyline(GenericIndexedCloudPersist* associatedCloud)
 	showVertices(false);
 	setVertexMarkerWidth(3);
 	setWidth(0);
-	showArrow(false,0,0);
+	showArrow(false, 0, 0);
 
 	ccGenericPointCloud* cloud = dynamic_cast<ccGenericPointCloud*>(associatedCloud);
 	if (cloud)
@@ -157,7 +156,7 @@ void ccPolyline::applyGLTransformation(const ccGLMatrix& trans)
 
 	//invalidate the bounding-box
 	//(and we hope the vertices will be updated as well!)
-	m_validBB = false;
+	invalidateBoundingBox();
 }
 
 //unit arrow
@@ -197,7 +196,7 @@ void ccPolyline::drawMeOnly(CC_DRAW_CONTEXT& context)
 		glFunc->glPushName(getUniqueIDForDisplay());
 
 	if (isColorOverriden())
-		ccGL::Color3v(glFunc, m_tempColor.rgb);
+		ccGL::Color3v(glFunc, getTempColor().rgb);
 	else if (colorsShown())
 		ccGL::Color3v(glFunc, m_rgbColor.rgb);
 
@@ -564,4 +563,131 @@ unsigned ccPolyline::segmentCount() const
 		--count;
 	}
 	return count;
+}
+
+void ccPolyline::setGlobalShift(const CCVector3d& shift)
+{
+	ccShiftedObject::setGlobalShift(shift);
+
+	ccPointCloud* pc = dynamic_cast<ccPointCloud*>(m_theAssociatedCloud);
+	if (pc && pc->getParent() == this)
+	{
+		//auto transfer the global shift info to the vertices
+		pc->setGlobalShift(shift);
+	}
+}
+
+void ccPolyline::setGlobalScale(double scale)
+{
+	ccShiftedObject::setGlobalScale(scale);
+
+	ccPointCloud* pc = dynamic_cast<ccPointCloud*>(m_theAssociatedCloud);
+	if (pc && pc->getParent() == this)
+	{
+		//auto transfer the global scale info to the vertices
+		pc->setGlobalScale(scale);
+	}
+}
+
+ccPointCloud* ccPolyline::samplePoints(	bool densityBased,
+										double samplingParameter,
+										bool withRGB)
+{
+	if (samplingParameter <= 0 || size() < 2)
+	{
+		assert(false);
+		return nullptr;
+	}
+
+	//we must compute the total length of the polyline
+	double L = this->computeLength();
+
+	unsigned pointCount = 0;
+	if (densityBased)
+	{
+		pointCount = static_cast<unsigned>(ceil(L * samplingParameter));
+	}
+	else
+	{
+		pointCount = static_cast<unsigned>(samplingParameter);
+	}
+
+	if (pointCount == 0)
+	{
+		assert(false);
+		return nullptr;
+	}
+
+	//convert to real point cloud
+	ccPointCloud* cloud = new ccPointCloud(getName() + "." + QObject::tr("sampled"));
+	if (!cloud->reserve(pointCount))
+	{
+		ccLog::Warning("[ccPolyline::samplePoints] Not enough memory");
+		delete cloud;
+		return nullptr;
+	}
+
+	double samplingStep = L / pointCount;
+	double s = 0.0; //current sampled point curvilinear position
+	unsigned indexA = 0; //index of the segment start vertex
+	double sA = 0.0; //curvilinear pos of the segment start vertex
+
+	for (unsigned i = 0; i < pointCount; )
+	{
+		unsigned indexB = ((indexA + 1) % size());
+		const CCVector3& A = *getPoint(indexA);
+		const CCVector3& B = *getPoint(indexB);
+		CCVector3 AB = B - A;
+		double lAB = AB.normd();
+
+		double relativePos = s - sA;
+		if (relativePos >= lAB)
+		{
+			//specific case: last point
+			if (i + 1 == pointCount)
+			{
+				assert(relativePos < lAB * 1.01); //it should only be a rounding issue in the worst case
+				relativePos = lAB;
+			}
+			else //skip this segment
+			{
+				++indexA;
+				sA += lAB;
+				continue;
+			}
+		}
+
+		//now for the interpolation work
+		double alpha = relativePos / lAB;
+		alpha = std::max(alpha, 0.0); //just in case
+		alpha = std::min(alpha, 1.0);
+
+		CCVector3 P = A + alpha * AB;
+		cloud->addPoint(P);
+
+		//proceed to the next point
+		++i;
+		s += samplingStep;
+	}
+
+	if (withRGB)
+	{
+		if (isColorOverriden())
+		{
+			//we use the default 'temporary' color
+			cloud->setRGBColor(getTempColor());
+		}
+		else if (colorsShown())
+		{
+			//we use the default color
+			cloud->setRGBColor(m_rgbColor);
+		}
+	}
+
+	//import parameters from the source
+	cloud->setGlobalShift(getGlobalShift());
+	cloud->setGlobalScale(getGlobalScale());
+	cloud->setGLTransformationHistory(getGLTransformationHistory());
+
+	return cloud;
 }

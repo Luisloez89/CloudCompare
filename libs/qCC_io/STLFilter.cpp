@@ -38,7 +38,7 @@
 //System
 #include <string.h>
 
-bool STLFilter::canLoadExtension(QString upperCaseExt) const
+bool STLFilter::canLoadExtension(const QString& upperCaseExt) const
 {
 	return (upperCaseExt == "STL");
 }
@@ -54,7 +54,7 @@ bool STLFilter::canSave(CC_CLASS_ENUM type, bool& multiple, bool& exclusive) con
 	return false;
 }
 
-CC_FILE_ERROR STLFilter::saveToFile(ccHObject* entity, QString filename, SaveParameters& parameters)
+CC_FILE_ERROR STLFilter::saveToFile(ccHObject* entity, const QString& filename, const SaveParameters& parameters)
 {
 	if (!entity)
 		return CC_FERR_BAD_ARGUMENT;
@@ -71,10 +71,15 @@ CC_FILE_ERROR STLFilter::saveToFile(ccHObject* entity, QString filename, SavePar
 	}
 
 	//ask for output format
-	QMessageBox msgBox(QMessageBox::Question, "Choose output format", "Save in BINARY or ASCII format?");
-	QPushButton *binaryButton = msgBox.addButton("BINARY", QMessageBox::AcceptRole);
-	msgBox.addButton("ASCII", QMessageBox::AcceptRole);
-	msgBox.exec();
+	bool binaryMode = true;
+	if (parameters.alwaysDisplaySaveDialog)
+	{
+		QMessageBox msgBox(QMessageBox::Question, "Choose output format", "Save in BINARY or ASCII format?");
+		QPushButton *binaryButton = msgBox.addButton("BINARY", QMessageBox::AcceptRole);
+		msgBox.addButton("ASCII", QMessageBox::AcceptRole);
+		msgBox.exec();
+		binaryMode = (msgBox.clickedButton() == binaryButton);
+	}
 
 	//try to open file for saving
 	FILE* theFile = fopen(qPrintable(filename), "wb");
@@ -82,7 +87,7 @@ CC_FILE_ERROR STLFilter::saveToFile(ccHObject* entity, QString filename, SavePar
 		return CC_FERR_WRITING;
 
 	CC_FILE_ERROR result = CC_FERR_NO_ERROR;
-	if (msgBox.clickedButton() == binaryButton)
+	if (binaryMode)
 	{
 		result = saveToBINFile(mesh, theFile);
 	}
@@ -102,12 +107,16 @@ CC_FILE_ERROR STLFilter::saveToBINFile(ccGenericMesh* mesh, FILE *theFile, QWidg
 	unsigned faceCount = mesh->size();
 
 	//progress
-	ccProgressDialog pDlg(true, parentWidget);
-	CCLib::NormalizedProgress nprogress(&pDlg, faceCount);
-	pDlg.setMethodTitle(QObject::tr("Saving mesh [%1]").arg(mesh->getName()));
-	pDlg.setInfo(QObject::tr("Number of facets: %1").arg(faceCount));
-	pDlg.start();
-	QApplication::processEvents();
+	QScopedPointer<ccProgressDialog> pDlg(0);
+	if (parentWidget)
+	{
+		pDlg.reset(new ccProgressDialog(true, parentWidget));
+		pDlg->setMethodTitle(QObject::tr("Saving mesh [%1]").arg(mesh->getName()));
+		pDlg->setInfo(QObject::tr("Number of facets: %1").arg(faceCount));
+		pDlg->start();
+		QApplication::processEvents();
+	}
+	CCLib::NormalizedProgress nprogress(pDlg.data(), faceCount);
 
 	//header
 	{
@@ -134,7 +143,7 @@ CC_FILE_ERROR STLFilter::saveToBINFile(ccGenericMesh* mesh, FILE *theFile, QWidg
 		ccLog::Warning("[STL] Global shift information can't be restored in STL Binary format! (too low precision)");
 	}
 
-	mesh->placeIteratorAtBegining();
+	mesh->placeIteratorAtBeginning();
 	for (unsigned i = 0; i < faceCount; ++i)
 	{
 		CCLib::VerticesIndexes*tsi = mesh->getNextTriangleVertIndexes();
@@ -170,11 +179,16 @@ CC_FILE_ERROR STLFilter::saveToBINFile(ccGenericMesh* mesh, FILE *theFile, QWidg
 		}
 
 		//progress
-		if (!nprogress.oneStep())
+		if (pDlg && !nprogress.oneStep())
+		{
 			return CC_FERR_CANCELED_BY_USER;
+		}
 	}
 
-	pDlg.stop();
+	if (pDlg)
+	{
+		pDlg->stop();
+	}
 
 	return CC_FERR_NO_ERROR;
 }
@@ -185,20 +199,26 @@ CC_FILE_ERROR STLFilter::saveToASCIIFile(ccGenericMesh* mesh, FILE *theFile, QWi
 	unsigned faceCount = mesh->size();
 
 	//progress
-	ccProgressDialog pDlg(true, parentWidget);
-	CCLib::NormalizedProgress nprogress(&pDlg, faceCount);
-	pDlg.setMethodTitle(QObject::tr("Saving mesh [%1]").arg(mesh->getName()));
-	pDlg.setInfo(QObject::tr("Number of facets: %1").arg(faceCount));
-	pDlg.start();
-	QApplication::processEvents();
+	QScopedPointer<ccProgressDialog> pDlg(0);
+	if (parentWidget)
+	{
+		pDlg.reset(new ccProgressDialog(true, parentWidget));
+		pDlg->setMethodTitle(QObject::tr("Saving mesh [%1]").arg(mesh->getName()));
+		pDlg->setInfo(QObject::tr("Number of facets: %1").arg(faceCount));
+		pDlg->start();
+		QApplication::processEvents();
+	}
+	CCLib::NormalizedProgress nprogress(pDlg.data(), faceCount);
 
 	if (fprintf(theFile, "solid %s\n", qPrintable(mesh->getName())) < 0) //empty names are acceptable!
+	{
 		return CC_FERR_WRITING;
+	}
 
 	//vertices
 	ccGenericPointCloud* vertices = mesh->getAssociatedCloud();
 
-	mesh->placeIteratorAtBegining();
+	mesh->placeIteratorAtBeginning();
 	for (unsigned i = 0; i < faceCount; ++i)
 	{
 		CCLib::VerticesIndexes*tsi = mesh->getNextTriangleVertIndexes();
@@ -234,22 +254,26 @@ CC_FILE_ERROR STLFilter::saveToASCIIFile(ccGenericMesh* mesh, FILE *theFile, QWi
 			return CC_FERR_WRITING;
 
 		//progress
-		if (!nprogress.oneStep())
+		if (pDlg && !nprogress.oneStep())
+		{
 			return CC_FERR_CANCELED_BY_USER;
+		}
 	}
 
 	if (fprintf(theFile, "endsolid %s\n", qPrintable(mesh->getName())) < 0) //empty names are acceptable!
+	{
 		return CC_FERR_WRITING;
+	}
 
 	return CC_FERR_NO_ERROR;
 }
 
 const PointCoordinateType c_defaultSearchRadius = static_cast<PointCoordinateType>(sqrt(ZERO_TOLERANCE));
-static bool TagDuplicatedVertices(const CCLib::DgmOctree::octreeCell& cell,
-	void** additionalParameters,
-	CCLib::NormalizedProgress* nProgress/*=0*/)
+static bool TagDuplicatedVertices(	const CCLib::DgmOctree::octreeCell& cell,
+									void** additionalParameters,
+									CCLib::NormalizedProgress* nProgress/*=0*/)
 {
-	GenericChunkedArray<1, int>* equivalentIndexes = static_cast<GenericChunkedArray<1, int>*>(additionalParameters[0]);
+	std::vector<int>* equivalentIndexes = static_cast<std::vector<int>*>(additionalParameters[0]);
 
 	//we look for points very near to the others (only if not yet tagged!)
 
@@ -288,7 +312,7 @@ static bool TagDuplicatedVertices(const CCLib::DgmOctree::octreeCell& cell,
 	for (unsigned i = 0; i < n; ++i)
 	{
 		int thisIndex = static_cast<int>(cell.points->getPointGlobalIndex(i));
-		if (equivalentIndexes->getValue(thisIndex) < 0) //has no equivalent yet 
+		if (equivalentIndexes->at(thisIndex) < 0) //has no equivalent yet 
 		{
 			cell.points->getPoint(i, nNSS.queryPoint);
 
@@ -304,12 +328,12 @@ static bool TagDuplicatedVertices(const CCLib::DgmOctree::octreeCell& cell,
 					//all the other points are equivalent to the query point
 					const unsigned& otherIndex = nNSS.pointsInNeighbourhood[j].pointIndex;
 					if (static_cast<int>(otherIndex) != thisIndex)
-						equivalentIndexes->setValue(otherIndex, thisIndex);
+						equivalentIndexes->at(otherIndex) = thisIndex;
 				}
 			}
 
 			//and the query point is always root
-			equivalentIndexes->setValue(thisIndex, thisIndex);
+			equivalentIndexes->at(thisIndex) = thisIndex;
 		}
 
 		if (nProgress && !nProgress->oneStep())
@@ -321,7 +345,7 @@ static bool TagDuplicatedVertices(const CCLib::DgmOctree::octreeCell& cell,
 	return true;
 }
 
-CC_FILE_ERROR STLFilter::loadFile(QString filename, ccHObject& container, LoadParameters& parameters)
+CC_FILE_ERROR STLFilter::loadFile(const QString& filename, ccHObject& container, LoadParameters& parameters)
 {
 	ccLog::Print(QString("[STL] Loading '%1'").arg(filename));
 
@@ -399,31 +423,39 @@ CC_FILE_ERROR STLFilter::loadFile(QString filename, ccHObject& container, LoadPa
 		mesh->shrinkToFit();
 		NormsIndexesTableType* normals = mesh->getTriNormsTable();
 		if (normals)
-			normals->shrinkToFit();
+		{
+			normals->shrink_to_fit();
+		}
 	}
 
 	//remove duplicated vertices
 	//if (false)
 	{
-		GenericChunkedArray<1, int>* equivalentIndexes = new GenericChunkedArray < 1, int > ;
-		const int razValue = -1;
-		if (equivalentIndexes && equivalentIndexes->resize(vertCount, true, razValue))
+		try
 		{
-			ccProgressDialog pDlg(true, parameters.parentWidget);
+			std::vector<int> equivalentIndexes;
+			const int razValue = -1;
+			equivalentIndexes.resize(vertCount, razValue);
+			
+			QScopedPointer<ccProgressDialog> pDlg(0);
+			if (parameters.parentWidget)
+			{
+				pDlg.reset(new ccProgressDialog(true, parameters.parentWidget));
+			}
 			ccOctree::Shared octree = ccOctree::Shared(new ccOctree(vertices));
-			if (!octree->build(parameters.parentWidget ? &pDlg : 0))
+			if (!octree->build(pDlg.data()))
 			{
 				octree.clear();
 			}
 			if (octree)
 			{
-				void* additionalParameters[] = { static_cast<void*>(equivalentIndexes) };
+				void* additionalParameters[] = { static_cast<void*>(&equivalentIndexes) };
 				unsigned result = octree->executeFunctionForAllCellsAtLevel(10,
-					TagDuplicatedVertices,
-					additionalParameters,
-					false,
-					parameters.parentWidget ? &pDlg : 0,
-					"Tag duplicated vertices");
+																			TagDuplicatedVertices,
+																			additionalParameters,
+																			false,
+																			pDlg.data(),
+																			"Tag duplicated vertices");
 
 				octree.clear();
 
@@ -432,12 +464,12 @@ CC_FILE_ERROR STLFilter::loadFile(QString filename, ccHObject& container, LoadPa
 					unsigned remainingCount = 0;
 					for (unsigned i = 0; i < vertCount; ++i)
 					{
-						int eqIndex = equivalentIndexes->getValue(i);
+						int eqIndex = equivalentIndexes[i];
 						assert(eqIndex >= 0);
 						if (eqIndex == static_cast<int>(i)) //root point
 						{
 							int newIndex = static_cast<int>(vertCount + remainingCount); //We replace the root index by its 'new' index (+ vertCount, to differentiate it later)
-							equivalentIndexes->setValue(i, newIndex);
+							equivalentIndexes[i] = newIndex;
 							++remainingCount;
 						}
 					}
@@ -449,11 +481,11 @@ CC_FILE_ERROR STLFilter::loadFile(QString filename, ccHObject& container, LoadPa
 						{
 							for (unsigned i = 0; i < vertCount; ++i)
 							{
-								int eqIndex = equivalentIndexes->getValue(i);
+								int eqIndex = equivalentIndexes[i];
 								if (eqIndex >= static_cast<int>(vertCount)) //root point
 									newVertices->addPoint(*vertices->getPoint(i));
 								else
-									equivalentIndexes->setValue(i, equivalentIndexes->getValue(eqIndex)); //and update the other indexes
+									equivalentIndexes[i] = equivalentIndexes[eqIndex]; //and update the other indexes
 							}
 						}
 
@@ -463,9 +495,9 @@ CC_FILE_ERROR STLFilter::loadFile(QString filename, ccHObject& container, LoadPa
 							for (unsigned i = 0; i < faceCount; ++i)
 							{
 								CCLib::VerticesIndexes* tri = mesh->getTriangleVertIndexes(i);
-								tri->i1 = static_cast<unsigned>(equivalentIndexes->getValue(tri->i1)) - vertCount;
-								tri->i2 = static_cast<unsigned>(equivalentIndexes->getValue(tri->i2)) - vertCount;
-								tri->i3 = static_cast<unsigned>(equivalentIndexes->getValue(tri->i3)) - vertCount;
+								tri->i1 = static_cast<unsigned>(equivalentIndexes[tri->i1]) - vertCount;
+								tri->i2 = static_cast<unsigned>(equivalentIndexes[tri->i2]) - vertCount;
+								tri->i3 = static_cast<unsigned>(equivalentIndexes[tri->i3]) - vertCount;
 
 								//very small triangles (or flat ones) may be implicitly removed by vertex fusion!
 								if (tri->i1 != tri->i2 && tri->i1 != tri->i3 && tri->i2 != tri->i3)
@@ -513,14 +545,10 @@ CC_FILE_ERROR STLFilter::loadFile(QString filename, ccHObject& container, LoadPa
 				ccLog::Warning("[STL] Not enough memory: couldn't removed duplicated vertices!");
 			}
 		}
-		else
+		catch (const std::bad_alloc&)
 		{
 			ccLog::Warning("[STL] Not enough memory: couldn't removed duplicated vertices!");
 		}
-
-		if (equivalentIndexes)
-			equivalentIndexes->release();
-		equivalentIndexes = 0;
 	}
 
 	NormsIndexesTableType* normals = mesh->getTriNormsTable();
@@ -583,13 +611,14 @@ CC_FILE_ERROR STLFilter::loadASCIIFile(QFile& fp,
 	mesh->setName(name);
 
 	//progress dialog
-	ccProgressDialog pDlg(true, parameters.parentWidget);
+	QScopedPointer<ccProgressDialog> pDlg(0);
 	if (parameters.parentWidget)
 	{
-		pDlg.setMethodTitle(QObject::tr("(ASCII) STL file"));
-		pDlg.setInfo(QObject::tr("Loading in progress..."));
-		pDlg.setRange(0, 0);
-		pDlg.start();
+		pDlg.reset(new ccProgressDialog(true, parameters.parentWidget));
+		pDlg->setMethodTitle(QObject::tr("(ASCII) STL file"));
+		pDlg->setInfo(QObject::tr("Loading in progress..."));
+		pDlg->setRange(0, 0);
+		pDlg->start();
 		QApplication::processEvents();
 	}
 
@@ -727,9 +756,13 @@ CC_FILE_ERROR STLFilter::loadASCIIFile(QFile& fp,
 			//first point: check for 'big' coordinates
 			if (pointCount == 0)
 			{
-				if (HandleGlobalShift(Pd, Pshift, parameters))
+				bool preserveCoordinateShift = true;
+				if (HandleGlobalShift(Pd, Pshift, preserveCoordinateShift, parameters))
 				{
-					vertices->setGlobalShift(Pshift);
+					if (preserveCoordinateShift)
+					{
+						vertices->setGlobalShift(Pshift);
+					}
 					ccLog::Warning("[STLFilter::loadFile] Cloud has been recentered! Translation: (%.2f ; %.2f ; %.2f)", Pshift.x, Pshift.y, Pshift.z);
 				}
 			}
@@ -787,16 +820,19 @@ CC_FILE_ERROR STLFilter::loadASCIIFile(QFile& fp,
 
 				if (normals)
 				{
-					bool success = normals->reserve(mesh->capacity());
+					bool success = normals->reserveSafe(mesh->capacity());
 					if (success && faceCount == 0) //specific case: allocate per triangle normal indexes the first time!
+					{
 						success = mesh->reservePerTriangleNormalIndexes();
+					}
 
 					if (!success)
 					{
 						ccLog::Warning("[STL] Not enough memory: can't store normals!");
 						mesh->removePerTriangleNormalIndexes();
 						mesh->setTriNormsTable(0);
-						normals = 0;
+						normals->release();
+						normals = nullptr;
 					}
 				}
 			}
@@ -848,11 +884,11 @@ CC_FILE_ERROR STLFilter::loadASCIIFile(QFile& fp,
 		}
 
 		//progress
-		if (parameters.parentWidget && (faceCount % 1024) == 0)
+		if (pDlg && (faceCount % 1024) == 0)
 		{
-			if (pDlg.wasCanceled())
+			if (pDlg->wasCanceled())
 				break;
-			pDlg.setValue(static_cast<int>(faceCount >> 10));
+			pDlg->setValue(static_cast<int>(faceCount >> 10));
 		}
 	}
 
@@ -861,9 +897,9 @@ CC_FILE_ERROR STLFilter::loadASCIIFile(QFile& fp,
 		ccLog::Warning("[STL] Failed to read some 'normal' values!");
 	}
 
-	if (parameters.parentWidget)
+	if (pDlg)
 	{
-		pDlg.close();
+		pDlg->close();
 	}
 
 	return result;
@@ -894,7 +930,7 @@ CC_FILE_ERROR STLFilter::loadBinaryFile(QFile& fp,
 	if (!mesh->reserve(faceCount))
 		return CC_FERR_NOT_ENOUGH_MEMORY;
 	NormsIndexesTableType* normals = mesh->getTriNormsTable();
-	if (normals && (!normals->reserve(faceCount) || !mesh->reservePerTriangleNormalIndexes()))
+	if (normals && (!normals->reserveSafe(faceCount) || !mesh->reservePerTriangleNormalIndexes()))
 	{
 		ccLog::Warning("[STL] Not enough memory: can't store normals!");
 		mesh->removePerTriangleNormalIndexes();
@@ -902,15 +938,16 @@ CC_FILE_ERROR STLFilter::loadBinaryFile(QFile& fp,
 	}
 
 	//progress dialog
-	ccProgressDialog pDlg(true, parameters.parentWidget);
-	CCLib::NormalizedProgress nProgress(&pDlg, faceCount);
+	QScopedPointer<ccProgressDialog> pDlg(0);
 	if (parameters.parentWidget)
 	{
-		pDlg.setMethodTitle(QObject::tr("Loading binary STL file"));
-		pDlg.setInfo(QObject::tr("Loading %1 faces").arg(faceCount));
-		pDlg.start();
+		pDlg.reset(new ccProgressDialog(true, parameters.parentWidget));
+		pDlg->setMethodTitle(QObject::tr("Loading binary STL file"));
+		pDlg->setInfo(QObject::tr("Loading %1 faces").arg(faceCount));
+		pDlg->start();
 		QApplication::processEvents();
 	}
+	CCLib::NormalizedProgress nProgress(pDlg.data(), faceCount);
 
 	//current vertex shift
 	CCVector3d Pshift(0, 0, 0);
@@ -937,9 +974,13 @@ CC_FILE_ERROR STLFilter::loadBinaryFile(QFile& fp,
 			CCVector3d Pd(Pf[0], Pf[1], Pf[2]);
 			if (pointCount == 0)
 			{
-				if (HandleGlobalShift(Pd, Pshift, parameters))
+				bool preserveCoordinateShift = true;
+				if (HandleGlobalShift(Pd, Pshift, preserveCoordinateShift, parameters))
 				{
-					vertices->setGlobalShift(Pshift);
+					if (preserveCoordinateShift)
+					{
+						vertices->setGlobalShift(Pshift);
+					}
 					ccLog::Warning("[STLFilter::loadFile] Cloud has been recentered! Translation: (%.2f ; %.2f ; %.2f)", Pshift.x, Pshift.y, Pshift.z);
 				}
 			}
@@ -1007,15 +1048,15 @@ CC_FILE_ERROR STLFilter::loadBinaryFile(QFile& fp,
 		}
 
 		//progress
-		if (parameters.parentWidget && !nProgress.oneStep())
+		if (pDlg && !nProgress.oneStep())
 		{
 			break;
 		}
 	}
 
-	if (parameters.parentWidget)
+	if (pDlg)
 	{
-		pDlg.stop();
+		pDlg->stop();
 	}
 
 	return CC_FERR_NO_ERROR;

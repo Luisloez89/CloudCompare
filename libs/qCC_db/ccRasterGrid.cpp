@@ -176,8 +176,8 @@ bool ccRasterGrid::fillWith(	ccGenericPointCloud* cloud,
 	}
 
 	//input cloud as a ccPointCloud
-	ccPointCloud* pc = 0;
-	if (cloud && cloud->isA(CC_TYPES::POINT_CLOUD))
+	ccPointCloud* pc = nullptr;
+	if (cloud->isA(CC_TYPES::POINT_CLOUD))
 	{
 		pc = static_cast<ccPointCloud*>(cloud);
 	}
@@ -216,7 +216,7 @@ bool ccRasterGrid::fillWith(	ccGenericPointCloud* cloud,
 	if (progressDialog)
 	{
 		progressDialog->setMethodTitle(QObject::tr("Grid generation"));
-		progressDialog->setInfo(QObject::tr("Points: %1\nCells: %2 x %3").arg(pointCount).arg(width).arg(height));
+		progressDialog->setInfo(QObject::tr("Points: %L1\nCells: %L2 x %L3").arg( pointCount ).arg(width).arg(height));
 		progressDialog->start();
 		progressDialog->show();
 		QCoreApplication::processEvents();
@@ -224,7 +224,7 @@ bool ccRasterGrid::fillWith(	ccGenericPointCloud* cloud,
 	CCLib::NormalizedProgress nProgress(progressDialog, pointCount);
 
 	//vertical dimension
-	assert(Z >= 0 && Z <= 2);
+	assert(Z <= 2);
 	const unsigned char X = Z == 2 ? 0 : Z + 1;
 	const unsigned char Y = X == 2 ? 0 : X + 1;
 
@@ -269,8 +269,8 @@ bool ccRasterGrid::fillWith(	ccGenericPointCloud* cloud,
 					if (hasColors)
 					{
 						assert(cloud->hasColors());
-						const ColorCompType* col = cloud->getPointColor(n);
-						aCell.color = CCVector3d(col[0], col[1], col[2]);
+						const ccColor::Rgb& col = cloud->getPointColor(n);
+						aCell.color = CCVector3d(col.r, col.g, col.b);
 					}
 				}
 			}
@@ -285,8 +285,8 @@ bool ccRasterGrid::fillWith(	ccGenericPointCloud* cloud,
 					if (hasColors)
 					{
 						assert(cloud->hasColors());
-						const ColorCompType* col = cloud->getPointColor(n);
-						aCell.color = CCVector3d(col[0], col[1], col[2]);
+						const ccColor::Rgb& col = cloud->getPointColor(n);
+						aCell.color = CCVector3d(col.r, col.g, col.b);
 					}
 				}
 			}
@@ -308,8 +308,8 @@ bool ccRasterGrid::fillWith(	ccGenericPointCloud* cloud,
 				if (hasColors)
 				{
 					assert(cloud->hasColors());
-					const ColorCompType* col = cloud->getPointColor(n);
-					aCell.color += CCVector3d(col[0], col[1], col[2]);
+					const ccColor::Rgb& col = cloud->getPointColor(n);
+					aCell.color += CCVector3d(col.r, col.g, col.b);
 				}
 
 			}
@@ -322,8 +322,8 @@ bool ccRasterGrid::fillWith(	ccGenericPointCloud* cloud,
 			if (hasColors)
 			{
 				assert(cloud->hasColors());
-				const ColorCompType* col = cloud->getPointColor(n);
-				aCell.color = CCVector3d(col[0], col[1], col[2]);
+				const ccColor::Rgb& col = cloud->getPointColor(n);
+				aCell.color = CCVector3d(col.r, col.g, col.b);
 			}
 		}
 		
@@ -400,7 +400,7 @@ bool ccRasterGrid::fillWith(	ccGenericPointCloud* cloud,
 		{
 			assert(!scalarFields[k].empty());
 
-			double* _gridSF = &scalarFields[k].front();
+			double* _gridSF = scalarFields[k].data();
 			for (unsigned j = 0; j < height; ++j)
 			{
 				Row& row = rows[j];
@@ -518,7 +518,7 @@ bool ccRasterGrid::fillWith(	ccGenericPointCloud* cloud,
 			{
 				unsigned triNum = delaunayMesh.size();
 				//now we are going to 'project' all triangles on the grid
-				delaunayMesh.placeIteratorAtBegining();
+				delaunayMesh.placeIteratorAtBeginning();
 				for (unsigned k = 0; k < triNum; ++k)
 				{
 					const CCLib::VerticesIndexes* tsi = delaunayMesh.getNextTriangleVertIndexes();
@@ -735,7 +735,7 @@ ccPointCloud* ccRasterGrid::convertToCloud(	const std::vector<ExportableFields>&
 	ccPointCloud* cloudGrid = 0;
 	
 	//if we 'resample' the input cloud, we actually resample it (one point in each cell)
-	//and we may have change some things aftewards (height, scalar fields, etc.)
+	//and we may have to change some things aftewards (height, scalar fields, etc.)
 	if (resampleInputCloudXY)
 	{
 		CCLib::ReferenceCloud refCloud(inputCloud);
@@ -886,12 +886,12 @@ ccPointCloud* ccRasterGrid::convertToCloud(	const std::vector<ExportableFields>&
 	unsigned nonEmptyCellIndex = 0;
 
 	//we work with doubles as the grid step can be much smaller than the cloud coordinates!
-	double Py = box.minCorner().u[Y] + gridStep / 2;
+	double Py = box.minCorner().u[Y]/* + gridStep / 2*/;
 
 	for (unsigned j = 0; j < height; ++j)
 	{
-		const ccRasterCell* aCell = &(rows[j].front());
-		double Px = box.minCorner().u[X] + gridStep / 2;
+		const ccRasterCell* aCell = rows[j].data();
+		double Px = box.minCorner().u[X]/* + gridStep / 2*/;
 		
 		for (unsigned i = 0; i < width; ++i, ++aCell)
 		{
@@ -914,7 +914,7 @@ ccPointCloud* ccRasterGrid::convertToCloud(	const std::vector<ExportableFields>&
 											static_cast<ColorCompType>(std::min(255.0, aCell->color.y)),
 											static_cast<ColorCompType>(std::min(255.0, aCell->color.z)) );
 						
-						cloudGrid->addRGBColor(col.rgb);
+						cloudGrid->addRGBColor(col);
 					}
 				}
 
@@ -983,7 +983,7 @@ ccPointCloud* ccRasterGrid::convertToCloud(	const std::vector<ExportableFields>&
 
 					if (interpolateColors)
 					{
-						cloudGrid->addRGBColor(ccColor::black.rgba);
+						cloudGrid->addRGBColor(ccColor::black);
 					}
 				}
 
@@ -1059,7 +1059,7 @@ ccPointCloud* ccRasterGrid::convertToCloud(	const std::vector<ExportableFields>&
 					//set sf values
 					unsigned n = 0;
 					const ScalarType emptyCellSFValue = CCLib::ScalarField::NaN();
-					const double* _sfGrid = &(scalarFields[k].front());
+					const double* _sfGrid = scalarFields[k].data();
 					for (unsigned j = 0; j < height; ++j)
 					{
 						const ccRasterGrid::Row& row = rows[j];
@@ -1089,7 +1089,7 @@ ccPointCloud* ccRasterGrid::convertToCloud(	const std::vector<ExportableFields>&
 		for (int k = 0; k < static_cast<int>(cloudGrid->getNumberOfScalarFields()); ++k)
 		{
 			CCLib::ScalarField* sf = cloudGrid->getScalarField(k);
-			sf->resize(cloudGrid->size(), true, NAN_VALUE);
+			sf->resizeSafe(cloudGrid->size(), true, NAN_VALUE);
 		}
 	}
 

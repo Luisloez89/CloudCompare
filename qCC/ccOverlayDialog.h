@@ -32,7 +32,7 @@ class ccOverlayDialog : public QDialog
 public:
 
 	//! Default constructor
-	explicit ccOverlayDialog(QWidget* parent = 0);
+	explicit ccOverlayDialog(QWidget* parent = 0, Qt::WindowFlags flags = Qt::FramelessWindowHint | Qt::Tool);
 
 	//! Destructor
 	virtual ~ccOverlayDialog();
@@ -77,10 +77,13 @@ signals:
 	**/
 	void shortcutTriggered(int key);
 
+	//! Signal emitted when a 'show' event is detected
+	void shown();
+
 protected slots:
 
 	//! Slot called when the linked window is deleted (calls 'onClose')
-	virtual void onLinkedWindowDeletion(QObject* object=0);
+	virtual void onLinkedWindowDeletion(QObject* object = 0);
 
 protected:
 

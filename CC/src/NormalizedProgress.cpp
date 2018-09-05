@@ -19,8 +19,7 @@
 #include "GenericProgressCallback.h"
 
 //system
-#include <assert.h>
-#include <math.h>
+#include <cassert>
 
 #ifdef USE_QT
 
